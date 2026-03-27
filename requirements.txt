@@ -4,7 +4,7 @@ python-dotenv==1.0.0
 
 # Base de données
 sqlalchemy>=2.0.29
-psycopg2-binary==2.9.11      # Driver PostgreSQL pour Python
+psycopg2-binary>=2.9.11      # Driver PostgreSQL pour Python
 
 # Cache & Queue
 redis==5.0.3
@@ -26,3 +26,4 @@ hubspot-api-client==8.2.1
 # Tests
 pytest==8.1.0
 pytest-asyncio==0.23.6
+pytest-env==1.1.3
