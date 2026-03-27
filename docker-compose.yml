@@ -1,0 +1,39 @@
+# docker-compose.yml — Environnement de développement local
+#
+# Lance PostgreSQL + Redis sans les installer sur ta machine.
+# Une seule commande : docker-compose up -d
+#
+# Les données PostgreSQL sont persistées dans un volume Docker
+# (elles survivent aux redémarrages du conteneur).
+
+services:
+
+  # ── Base de données PostgreSQL ─────────────────────────────────────────
+  postgres:
+    image: postgres:16-alpine        # Version légère (Alpine Linux)
+    container_name: t4a_postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB:       trace4artist
+      POSTGRES_USER:     t4a_user
+      POSTGRES_PASSWORD: t4a_password
+    ports:
+      - "5432:5432"                  # Port local:port conteneur
+    volumes:
+      - postgres_data:/var/lib/postgresql/data   # Persistance des données
+      - ./migrations:/docker-entrypoint-initdb.d # Auto-exécute les migrations SQL au 1er démarrage
+
+  # ── Cache et Queue Redis ───────────────────────────────────────────────
+  redis:
+    image: redis:7-alpine
+    container_name: t4a_redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"                  # Port standard Redis
+    command: redis-server --maxmemory 128mb --maxmemory-policy allkeys-lru
+    # maxmemory-policy : quand Redis est plein, il supprime les clés
+    # les moins récemment utilisées (LRU = Least Recently Used)
+
+# ── Volumes persistants ────────────────────────────────────────────────
+volumes:
+  postgres_data:

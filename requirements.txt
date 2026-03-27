@@ -1,0 +1,28 @@
+# Core
+google-api-python-client==2.111.0
+python-dotenv==1.0.0
+
+# Base de données
+sqlalchemy==2.0.48
+psycopg2-binary==2.9.11      # Driver PostgreSQL pour Python
+
+# Cache & Queue
+redis==5.0.3
+celery==5.3.6
+
+# Scheduler
+apscheduler==3.10.4
+
+# API interne
+fastapi==0.110.0
+uvicorn==0.29.0
+
+# Google Search
+requests==2.31.0
+
+# HubSpot
+hubspot-api-client==8.2.1
+
+# Tests
+pytest==8.1.0
+pytest-asyncio==0.23.6
