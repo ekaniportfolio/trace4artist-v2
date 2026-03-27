@@ -1,14 +1,9 @@
 """
 src/worker.py — Configuration Celery et définition des tâches
 
-Les imports des modules métier (youtube_client, searcher, scorer,
-hubspot_client) sont faits À L'INTÉRIEUR de chaque tâche, au moment
-de leur exécution. Cela évite deux problèmes :
-    1. Les imports circulaires au démarrage de Celery
-    2. Les ImportError sur des modules pas encore créés
-
-Les tâches sont des stubs pour l'instant — elles seront complétées
-au fur et à mesure que les modules seront créés aux étapes suivantes.
+Étape 3 : fetch_video_details branché sur youtube_client + searcher
+Étape 4 : score_pending_artists sera branché sur scorer v2
+Étape 6 : sync_to_hubspot sera branché sur hubspot_client
 """
 
 from celery import Celery
@@ -18,7 +13,6 @@ from config import CELERY_BROKER_URL, CELERY_RESULT_BACKEND
 
 logger = get_task_logger(__name__)
 
-# ── Initialisation de l'app Celery ─────────────────────────────────────
 celery_app = Celery(
     "trace4artist",
     broker=CELERY_BROKER_URL,
@@ -38,11 +32,6 @@ celery_app.conf.update(
 )
 
 
-# ──────────────────────────────────────────────────────────────────────
-# TÂCHE 1 : fetch_video_details
-# Complétée à l'Étape 3 (youtube_client + searcher)
-# ──────────────────────────────────────────────────────────────────────
-
 @celery_app.task(
     bind=True,
     max_retries=3,
@@ -51,27 +40,34 @@ celery_app.conf.update(
 )
 def fetch_video_details(self, video_ids: list, channel_ids: list, region: str):
     """
-    Récupère les détails d'un batch de vidéos + chaînes YouTube
-    et les sauvegarde en base.
-
-    TODO Étape 3 : brancher youtube_client + searcher + database
+    Récupère et sauvegarde les détails d'un batch de vidéos + chaînes.
+    Branché sur ArtistSearcher depuis l'Étape 3.
     """
-    logger.info(
-        f"[{region}] fetch_video_details — "
-        f"{len(video_ids)} vidéo(s) [stub — Étape 3]"
-    )
-    return {
-        "region"      : region,
-        "saved_videos": 0,
-        "new_artists" : 0,
-        "status"      : "stub",
-    }
+    from src.youtube_client import YouTubeClient
+    from src.searcher import ArtistSearcher
 
+    try:
+        client   = YouTubeClient()
+        searcher = ArtistSearcher(client=client)
 
-# ──────────────────────────────────────────────────────────────────────
-# TÂCHE 2 : score_pending_artists
-# Complétée à l'Étape 4 (scorer v2)
-# ──────────────────────────────────────────────────────────────────────
+        logger.info(f"[{region}] fetch_video_details — {len(video_ids)} vidéo(s)")
+
+        result = searcher.process_batch(
+            video_ids   = video_ids,
+            channel_ids = channel_ids,
+            region      = region,
+        )
+
+        logger.info(
+            f"[{region}] ✅ {result['saved_videos']} vidéos, "
+            f"{result['new_artists']} nouveaux artistes"
+        )
+        return result
+
+    except Exception as exc:
+        logger.error(f"[{region}] Erreur : {exc}")
+        raise self.retry(exc=exc, countdown=60 * (self.request.retries + 1))
+
 
 @celery_app.task(
     name="tasks.score_pending_artists",
@@ -80,17 +76,11 @@ def fetch_video_details(self, video_ids: list, channel_ids: list, region: str):
 def score_pending_artists():
     """
     Score tous les artistes en statut 'discovered'.
-
-    TODO Étape 4 : brancher scorer v2
+    TODO Étape 4 : brancher scorer v2.
     """
     logger.info("score_pending_artists [stub — Étape 4]")
     return {"total": 0, "qualified": 0, "status": "stub"}
 
-
-# ──────────────────────────────────────────────────────────────────────
-# TÂCHE 3 : sync_to_hubspot
-# Complétée à l'Étape 6 (hubspot_client)
-# ──────────────────────────────────────────────────────────────────────
 
 @celery_app.task(
     name="tasks.sync_to_hubspot",
@@ -100,8 +90,7 @@ def score_pending_artists():
 def sync_to_hubspot():
     """
     Synchronise les artistes qualifiés vers HubSpot CRM.
-
-    TODO Étape 6 : brancher hubspot_client
+    TODO Étape 6 : brancher hubspot_client.
     """
     logger.info("sync_to_hubspot [stub — Étape 6]")
     return {"synced": 0, "status": "stub"}
