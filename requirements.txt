@@ -3,7 +3,7 @@ google-api-python-client==2.111.0
 python-dotenv==1.0.0
 
 # Base de données
-sqlalchemy==2.0.48
+sqlalchemy>=2.0.29
 psycopg2-binary==2.9.11      # Driver PostgreSQL pour Python
 
 # Cache & Queue
