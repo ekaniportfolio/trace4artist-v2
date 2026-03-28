@@ -21,7 +21,7 @@ uvicorn==0.29.0
 requests==2.31.0
 
 # HubSpot
-hubspot-api-client==8.2.1
+hubspot-api-client>=8.2.1
 
 # Tests
 pytest==8.1.0

@@ -41,7 +41,8 @@ from src.searcher import ArtistSearcher
 from src.phase_manager import PhaseManager
 from src.settings_manager import SettingsManager
 from src.worker import (
-    fetch_video_details, score_pending_artists, sync_to_hubspot
+    fetch_video_details, score_pending_artists,
+    enrich_artists, sync_to_hubspot
 )
 
 logging.basicConfig(
@@ -108,9 +109,11 @@ class DetectionJob:
         transitions = self.phases.update_all_phases()
         logger.info(f"  Transitions : {transitions}")
 
-        # Déclencher scoring et sync
+        # Séquence post-détection
+        # 2min → scoring | 10min → enrichissement | 15min → HubSpot
         score_pending_artists.apply_async(countdown=120)
-        sync_to_hubspot.apply_async(countdown=300)
+        enrich_artists.apply_async(countdown=600)
+        sync_to_hubspot.apply_async(countdown=900)
 
         self._end_scan_log(
             scan_id, "completed",

@@ -76,10 +76,33 @@ def fetch_video_details(self, video_ids: list, channel_ids: list, region: str):
 def score_pending_artists():
     """
     Score tous les artistes en statut 'discovered'.
-    TODO Étape 4 : brancher scorer v2.
+    Branché sur ArtistScorer depuis l'Étape 4.
     """
-    logger.info("score_pending_artists [stub — Étape 4]")
-    return {"total": 0, "qualified": 0, "status": "stub"}
+    from src.scorer import ArtistScorer
+
+    scorer  = ArtistScorer()
+    results = scorer.score_all_discovered()
+
+    qualified = sum(1 for r in results if r.is_qualified)
+    logger.info(f"Scoring terminé : {qualified}/{len(results)} qualifiés")
+    return {"total": len(results), "qualified": qualified}
+
+
+@celery_app.task(
+    name="tasks.enrich_artists",
+    max_retries=2,
+)
+def enrich_artists():
+    """
+    Enrichit les profils d artistes via Google Custom Search.
+    Branché sur GoogleSearchEnricher depuis l Étape 6.
+    """
+    from src.enricher import GoogleSearchEnricher
+    enricher = GoogleSearchEnricher()
+    results  = enricher.enrich_qualified_artists()
+    enriched = sum(1 for r in results if r.success)
+    logger.info(f"Enrichissement : {enriched}/{len(results)} artistes enrichis")
+    return {"total": len(results), "enriched": enriched}
 
 
 @celery_app.task(
@@ -90,7 +113,14 @@ def score_pending_artists():
 def sync_to_hubspot():
     """
     Synchronise les artistes qualifiés vers HubSpot CRM.
-    TODO Étape 6 : brancher hubspot_client.
+    Branché sur HubSpotClient depuis l Étape 6.
     """
-    logger.info("sync_to_hubspot [stub — Étape 6]")
-    return {"synced": 0, "status": "stub"}
+    from src.hubspot_client import HubSpotClient
+    try:
+        client = HubSpotClient()
+        synced = client.sync_qualified_artists()
+        logger.info(f"HubSpot sync : {synced} contact(s) synchronisé(s)")
+        return {"synced": synced}
+    except ValueError as e:
+        logger.warning(f"HubSpot non configuré : {e}")
+        return {"synced": 0, "status": "not_configured"}
