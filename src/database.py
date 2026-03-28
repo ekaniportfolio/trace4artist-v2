@@ -207,3 +207,143 @@ def get_last_scan_date() -> str | None:
         if row and row[0]:
             return row[0].isoformat()
         return None
+
+
+# ──────────────────────────────────────────────────────────────────────
+# FONCTIONS AJOUTÉES — Migration 003
+# ──────────────────────────────────────────────────────────────────────
+
+def save_view_snapshot_enriched(
+    video_id        : str,
+    view_count      : int,
+    like_count      : int = 0,
+    comment_count   : int = 0,
+    subscriber_count: int = 0,
+):
+    """
+    Version enrichie de save_view_snapshot.
+    Stocke les métriques complètes au moment du snapshot
+    pour permettre un scoring historique précis.
+
+    Remplace save_view_snapshot() à partir de la Migration 003.
+    """
+    with get_db() as conn:
+        conn.execute(text("""
+            INSERT INTO view_snapshots
+                (video_id, view_count, like_count,
+                 comment_count, subscriber_count)
+            VALUES
+                (:video_id, :view_count, :like_count,
+                 :comment_count, :subscriber_count)
+        """), {
+            "video_id"        : video_id,
+            "view_count"      : view_count,
+            "like_count"      : like_count,
+            "comment_count"   : comment_count,
+            "subscriber_count": subscriber_count,
+        })
+
+
+def get_snapshots_for_velocity(
+    video_id    : str,
+    window_hours: int = 24,
+    limit       : int = 10,
+) -> list[dict]:
+    """
+    Récupère les derniers snapshots d'une vidéo pour
+    le calcul de vélocité sur une fenêtre de temps donnée.
+
+    Returns:
+        Liste de snapshots ordonnés du plus ancien au plus récent.
+    """
+    with get_db() as conn:
+        result = conn.execute(text("""
+            SELECT
+                view_count, like_count, comment_count,
+                subscriber_count, snapped_at
+            FROM view_snapshots
+            WHERE video_id  = :video_id
+              AND snapped_at >= NOW() - INTERVAL ':hours hours'
+            ORDER BY snapped_at ASC
+            LIMIT :limit
+        """), {"video_id": video_id, "hours": window_hours, "limit": limit})
+        return [dict(row._mapping) for row in result.fetchall()]
+
+
+def get_videos_by_tracking_phase(phase: str) -> list[dict]:
+    """
+    Récupère toutes les vidéos d'une phase de tracking donnée.
+    Utilisé par le scheduler tiered pour savoir quoi monitorer.
+    """
+    with get_db() as conn:
+        result = conn.execute(text("""
+            SELECT
+                v.video_id, v.channel_id, v.view_count,
+                v.like_count, v.comment_count,
+                v.published_at, v.tracking_phase,
+                a.subscriber_count
+            FROM videos v
+            JOIN artists a ON v.channel_id = a.channel_id
+            WHERE v.tracking_phase = :phase
+            ORDER BY v.published_at DESC
+        """), {"phase": phase})
+        return [dict(row._mapping) for row in result.fetchall()]
+
+
+def update_tracking_phase(
+    video_id  : str,
+    new_phase : str,
+    old_phase : str,
+):
+    """
+    Met à jour la phase de tracking d'une vidéo et
+    enregistre une alerte 'phase_change' (Option B).
+    """
+    import json
+    with get_db() as conn:
+        conn.execute(text("""
+            UPDATE videos SET
+                tracking_phase  = :new_phase,
+                phase_changed_at = NOW()
+            WHERE video_id = :video_id
+        """), {"video_id": video_id, "new_phase": new_phase})
+
+        # Log du changement de phase (Option B)
+        conn.execute(text("""
+            INSERT INTO video_alerts
+                (video_id, channel_id, alert_type, details)
+            SELECT
+                :video_id,
+                channel_id,
+                'phase_change',
+                :details
+            FROM videos WHERE video_id = :video_id
+        """), {
+            "video_id": video_id,
+            "details" : json.dumps({
+                "from": old_phase,
+                "to"  : new_phase,
+            }),
+        })
+
+
+def save_alert(
+    video_id  : str,
+    channel_id: str,
+    alert_type: str,
+    details   : dict,
+):
+    """Enregistre une alerte (breakout, fake_views, etc.)."""
+    import json
+    with get_db() as conn:
+        conn.execute(text("""
+            INSERT INTO video_alerts
+                (video_id, channel_id, alert_type, details)
+            VALUES
+                (:video_id, :channel_id, :alert_type, :details)
+        """), {
+            "video_id"  : video_id,
+            "channel_id": channel_id,
+            "alert_type": alert_type,
+            "details"   : json.dumps(details),
+        })
