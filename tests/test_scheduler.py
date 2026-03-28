@@ -132,7 +132,7 @@ class TestCeleryTasksTriggered:
  
             job.run()
  
-        mock_sync.apply_async.assert_called_once_with(countdown=300)
+        mock_sync.apply_async.assert_called_once_with(countdown=900)
  
     def test_phases_updated_after_detection(self, job):
         """update_all_phases doit être appelé après chaque détection."""

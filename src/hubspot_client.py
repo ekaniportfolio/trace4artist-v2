@@ -50,7 +50,7 @@ HUBSPOT_CUSTOM_PROPERTIES = {
 class SyncResult:
     channel_id  : str
     artist_name : str
-    action      : str    # 'created' | 'updated' | 'skipped' | 'error'
+    action : str = "skipped"    # 'created' | 'updated' | 'skipped' | 'error'
     hubspot_id  : str | None = None
     error       : str | None = None
 
