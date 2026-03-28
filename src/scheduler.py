@@ -11,6 +11,10 @@ Logique de date de recherche :
     - Scans suivants  : date de fin du dernier scan réussi
 
 Étape 3 : _scan_region branché sur ArtistSearcher.search_region()
+
+Les paramètres de scan sont lus depuis PostgreSQL via SettingsManager
+à chaque exécution — ils peuvent être modifiés à chaud via l'API
+sans redémarrer le scheduler.
 """
  
 import logging
@@ -19,16 +23,11 @@ from datetime import datetime, timezone, timedelta
 from apscheduler.schedulers.blocking import BlockingScheduler
 from apscheduler.triggers.interval import IntervalTrigger
  
-from config import (
-    SCAN_INTERVAL_HOURS,
-    INITIAL_LOOKBACK_DAYS,
-    TARGET_REGIONS,
-    QUOTA_COST,
-    DAILY_QUOTA_LIMIT,
-)
+from config import QUOTA_COST, DAILY_QUOTA_LIMIT
 from src.database import get_last_scan_date, get_quota_used_today, get_db
 from src.youtube_client import QuotaExceededError
 from src.searcher import ArtistSearcher
+from src.settings_manager import SettingsManager
 from src.worker import fetch_video_details, score_pending_artists, sync_to_hubspot
  
 logging.basicConfig(
@@ -43,20 +42,26 @@ class ScanOrchestrator:
  
     def __init__(self):
         self.searcher = ArtistSearcher()
+        self.settings = SettingsManager()
  
     def run(self):
         logger.info("=" * 55)
         logger.info("  Démarrage du scan")
         logger.info("=" * 55)
  
+        # Lecture des paramètres à chaque exécution — jamais figés
+        regions         = self.settings.get_regions()
         published_after = self._get_published_after()
+ 
+        logger.info(f"  Pays cibles      : {', '.join(regions)}")
         logger.info(f"  Recherche depuis : {published_after}")
+        logger.info(f"  Max résultats    : {self.settings.get_max_results()}")
+        logger.info(f"  Mots-clés        : {self.settings.get_keywords()}")
  
-        scan_id     = self._start_scan_log()
+        scan_id      = self._start_scan_log()
         quota_before = get_quota_used_today()
-        quota_remaining = DAILY_QUOTA_LIMIT - quota_before
  
-        if quota_remaining < QUOTA_COST["search.list"]:
+        if DAILY_QUOTA_LIMIT - quota_before < QUOTA_COST["search.list"]:
             logger.warning("Quota insuffisant. Scan annulé.")
             self._end_scan_log(scan_id, status="failed", error="Quota insuffisant")
             return
@@ -64,7 +69,7 @@ class ScanOrchestrator:
         total_videos = 0
         total_tasks  = 0
  
-        for region in TARGET_REGIONS:
+        for region in regions:
             if DAILY_QUOTA_LIMIT - get_quota_used_today() < QUOTA_COST["search.list"]:
                 logger.warning(f"Quota épuisé, arrêt avant {region}")
                 break
@@ -88,16 +93,14 @@ class ScanOrchestrator:
         logger.info("Scan terminé")
  
     def _scan_region(self, region: str, published_after: str) -> tuple[int, int]:
-        """
-        Recherche les vidéos d'un pays et envoie les batches à Celery.
-        Branché sur ArtistSearcher.search_region() depuis l'Étape 3.
-        """
         logger.info(f"🌍 [{region}] Recherche...")
  
         try:
             video_ids, channel_ids = self.searcher.search_region(
                 region          = region,
                 published_after = published_after,
+                max_results     = self.settings.get_max_results(),
+                keywords        = self.settings.get_keywords(),
             )
         except QuotaExceededError:
             logger.warning(f"[{region}] Quota dépassé")
@@ -110,10 +113,8 @@ class ScanOrchestrator:
             logger.info(f"[{region}] Aucun résultat")
             return 0, 0
  
-        # Envoyer en batches de 50 à Celery
         batch_size = 50
         tasks_sent = 0
- 
         for i in range(0, len(video_ids), batch_size):
             fetch_video_details.delay(
                 video_ids   = video_ids[i:i + batch_size],
@@ -128,9 +129,13 @@ class ScanOrchestrator:
     def _get_published_after(self) -> str:
         last_scan = get_last_scan_date()
         if last_scan:
+            logger.info("  Mode : incrémental")
             return last_scan
-        start_date = datetime.now(timezone.utc) - timedelta(days=INITIAL_LOOKBACK_DAYS)
-        return start_date.strftime("%Y-%m-%dT%H:%M:%SZ")
+        # Lecture du lookback depuis PostgreSQL, pas depuis config.py
+        lookback = self.settings.get_lookback_days()
+        start    = datetime.now(timezone.utc) - timedelta(days=lookback)
+        logger.info(f"  Mode : initial ({lookback}j de lookback)")
+        return start.strftime("%Y-%m-%dT%H:%M:%SZ")
  
     def _start_scan_log(self) -> int:
         from sqlalchemy import text
@@ -164,18 +169,22 @@ class ScanOrchestrator:
  
 def start_scheduler():
     orchestrator = ScanOrchestrator()
+    settings     = SettingsManager()
     scheduler    = BlockingScheduler(timezone="UTC")
+ 
+    # L'intervalle est aussi lu depuis PostgreSQL
+    interval_hours = settings.get_scan_interval()
  
     scheduler.add_job(
         func               = orchestrator.run,
-        trigger            = IntervalTrigger(hours=SCAN_INTERVAL_HOURS),
+        trigger            = IntervalTrigger(hours=interval_hours),
         id                 = "main_scan",
-        name               = f"Scan YouTube toutes les {SCAN_INTERVAL_HOURS}h",
+        name               = f"Scan YouTube toutes les {interval_hours}h",
         misfire_grace_time = 300,
         replace_existing   = True,
     )
  
-    logger.info(f"Scheduler démarré — scan toutes les {SCAN_INTERVAL_HOURS}h")
+    logger.info(f"Scheduler démarré — scan toutes les {interval_hours}h")
     orchestrator.run()
  
     try:
@@ -187,4 +196,3 @@ def start_scheduler():
  
 if __name__ == "__main__":
     start_scheduler()
- 

@@ -100,10 +100,11 @@ class ArtistSearcher:
             "updated_artists": updated_artists,
         }
 
-    def search_region(self, region: str, published_after: str) -> tuple[list, list]:
+    def search_region(self, region: str, published_after: str, max_results: int = None, keywords: str = None) -> tuple[list, list]:
         """
         Lance search.list pour un pays et retourne les IDs.
-        Appelé par _scan_region() dans scheduler.py.
+        max_results et keywords sont lus depuis SettingsManager si non fournis.
+        Valeurs par défaut issues de config.py.
 
         Returns:
             (video_ids, channel_ids) — listes parallèles
@@ -112,8 +113,8 @@ class ArtistSearcher:
             response = self.client.search_music_videos(
                 region          = region,
                 published_after = published_after,
-                keywords        = SEARCH_KEYWORDS,
-                max_results     = MAX_RESULTS_PER_SEARCH,
+                keywords        = keywords or SEARCH_KEYWORDS,
+                max_results     = max_results or MAX_RESULTS_PER_SEARCH,
             )
         except QuotaExceededError:
             raise
