@@ -1,16 +1,29 @@
 """
 src/hubspot_client.py — Intégration HubSpot CRM
 
-Synchronise les artistes qualifiés vers HubSpot comme contacts.
-Crée les propriétés custom si elles n'existent pas.
-Assigne le bon segment pour déclencher les workflows automatisés.
+Utilise les propriétés natives HubSpot + exactement 10 custom properties
+(limite du compte gratuit).
 
-Prérequis HubSpot :
-    1. Créer une Private App dans HubSpot
-    2. Scopes requis :
-       - crm.objects.contacts.write
-       - crm.objects.contacts.read
-    3. Copier le token dans .env : HUBSPOT_API_KEY=pat-xxx
+Propriétés natives utilisées :
+    firstname   → nom d'artiste
+    email       → email de contact
+    company     → label / management
+    website     → site officiel
+    country     → pays détecté
+    phone       → WhatsApp si disponible
+    createdate  → auto-géré par HubSpot (= detection_date)
+
+10 propriétés custom Trace4Artist :
+    1.  youtube_channel_id
+    2.  youtube_channel_url
+    3.  prospect_score
+    4.  prospect_segment
+    5.  contact_type        ← artist | manager | label
+    6.  source_platform
+    7.  video_views
+    8.  channel_subscribers
+    9.  latest_video_url
+    10. spr_score
 """
 
 import logging
@@ -26,31 +39,27 @@ from sqlalchemy import text
 
 logger = logging.getLogger(__name__)
 
-# Propriétés custom HubSpot — à créer manuellement dans HubSpot
-# (Settings → Properties → Create property)
-# ou via l'API Properties au premier lancement
-HUBSPOT_CUSTOM_PROPERTIES = {
-    "artist_name"         : "Nom d'artiste",
-    "youtube_channel_id"  : "ID Chaîne YouTube",
-    "youtube_channel_url" : "URL Chaîne YouTube",
-    "prospect_score"      : "Score Trace4Artist (0-100)",
-    "prospect_segment"    : "Segment (high_potential/standard/emerging)",
-    "source_platform"     : "Plateforme source",
-    "country_detected"    : "Pays détecté",
-    "video_views"         : "Vues meilleure vidéo",
-    "channel_subscribers" : "Abonnés chaîne",
-    "detection_date"      : "Date première détection",
-    "spotify_url"         : "Lien Spotify",
-    "apple_music_url"     : "Lien Apple Music",
-    "label"               : "Label / Management détecté",
-}
+# Les 10 propriétés custom à créer dans HubSpot
+# Settings → Properties → Contact properties → Create property
+HUBSPOT_CUSTOM_PROPERTIES = [
+    "youtube_channel_id",
+    "youtube_channel_url",
+    "prospect_score",
+    "prospect_segment",
+    "contact_type",
+    "source_platform",
+    "video_views",
+    "channel_subscribers",
+    "latest_video_url",
+    "spr_score",
+]
 
 
 @dataclass
 class SyncResult:
     channel_id  : str
     artist_name : str
-    action : str = "skipped"    # 'created' | 'updated' | 'skipped' | 'error'
+    action      : str = "skipped"   # 'created' | 'updated' | 'skipped' | 'error'
     hubspot_id  : str | None = None
     error       : str | None = None
 
@@ -73,12 +82,7 @@ class HubSpotClient:
         self._client = HubSpot(access_token=HUBSPOT_API_KEY)
 
     def sync_qualified_artists(self) -> int:
-        """
-        Synchronise tous les artistes qualifiés non encore dans HubSpot.
-
-        Returns:
-            Nombre de contacts créés ou mis à jour.
-        """
+        """Synchronise tous les artistes qualifiés vers HubSpot."""
         artists = self._get_artists_to_sync()
 
         if not artists:
@@ -86,61 +90,51 @@ class HubSpotClient:
             return 0
 
         logger.info(f"Synchronisation HubSpot : {len(artists)} artiste(s)...")
+        results = [self._sync_artist(a) for a in artists]
 
-        results  = [self._sync_artist(a) for a in artists]
-        created  = sum(1 for r in results if r.action == "created")
-        updated  = sum(1 for r in results if r.action == "updated")
-        errors   = sum(1 for r in results if r.action == "error")
+        created = sum(1 for r in results if r.action == "created")
+        updated = sum(1 for r in results if r.action == "updated")
+        errors  = sum(1 for r in results if r.action == "error")
 
         logger.info(
-            f"HubSpot sync terminé : "
-            f"{created} créés, {updated} mis à jour, {errors} erreurs"
+            f"HubSpot sync : {created} créés, "
+            f"{updated} mis à jour, {errors} erreurs"
         )
         return created + updated
 
     def _sync_artist(self, artist: dict) -> SyncResult:
-        """
-        Crée ou met à jour un contact HubSpot pour un artiste.
-
-        Logique :
-            - Si hubspot_contact_id existe en base → UPDATE
-            - Sinon → recherche par email → CREATE ou UPDATE
-        """
+        """Crée ou met à jour un contact HubSpot."""
         result = SyncResult(
             channel_id  = artist["channel_id"],
             artist_name = artist.get("artist_name", ""),
         )
-
         properties = self._build_properties(artist)
 
         try:
             existing_id = artist.get("hubspot_contact_id")
 
             if existing_id:
-                # Mise à jour d'un contact existant
                 self._client.crm.contacts.basic_api.update(
-                    contact_id    = existing_id,
-                    simple_public_object_input = {"properties": properties},
+                    contact_id=existing_id,
+                    simple_public_object_input={"properties": properties},
                 )
                 result.action     = "updated"
                 result.hubspot_id = existing_id
 
             else:
-                # Vérifier si le contact existe déjà par email
                 email = artist.get("email")
                 if email:
-                    existing = self._find_by_email(email)
-                    if existing:
+                    found_id = self._find_by_email(email)
+                    if found_id:
                         self._client.crm.contacts.basic_api.update(
-                            contact_id    = existing,
-                            simple_public_object_input = {"properties": properties},
+                            contact_id=found_id,
+                            simple_public_object_input={"properties": properties},
                         )
                         result.action     = "updated"
-                        result.hubspot_id = existing
-                        self._save_hubspot_id(artist["channel_id"], existing)
+                        result.hubspot_id = found_id
+                        self._save_hubspot_id(artist["channel_id"], found_id)
                         return result
 
-                # Création d'un nouveau contact
                 contact = self._client.crm.contacts.basic_api.create(
                     simple_public_object_input_for_create=
                     SimplePublicObjectInputForCreate(properties=properties)
@@ -153,50 +147,47 @@ class HubSpotClient:
             result.action = "error"
             result.error  = str(e)
             logger.error(
-                f"HubSpot erreur pour {artist.get('artist_name')} : {e}"
+                f"HubSpot erreur [{artist.get('artist_name')}] : {e}"
             )
 
         return result
 
     def _build_properties(self, artist: dict) -> dict:
         """
-        Construit le dictionnaire de propriétés HubSpot
-        depuis les données de l'artiste.
+        Construit les propriétés HubSpot depuis les données artiste.
+
+        Priorité native > custom pour rester dans la limite des 10.
         """
         enrichment = artist.get("enrichment_data") or {}
 
         props = {
-            # Propriétés standard HubSpot
-            "firstname"    : artist.get("artist_name", ""),
-            "email"        : artist.get("email", ""),
+            # ── Propriétés NATIVES HubSpot ─────────────────────────────
+            "firstname"  : artist.get("artist_name", ""),
+            "email"      : artist.get("email", ""),
+            "company"    : enrichment.get("label", ""),  # Label / management
+            "website"    : artist.get("website", ""),
+            "country"    : artist.get("country", ""),
 
-            # Propriétés custom Trace4Artist
-            "artist_name"        : artist.get("artist_name", ""),
-            "youtube_channel_id" : artist.get("channel_id", ""),
-            "youtube_channel_url": (
+            # ── 10 propriétés CUSTOM Trace4Artist ──────────────────────
+            "youtube_channel_id"  : artist.get("channel_id", ""),
+            "youtube_channel_url" : (
                 f"https://youtube.com/channel/{artist.get('channel_id', '')}"
             ),
-            "prospect_score"     : str(artist.get("score", 0)),
-            "prospect_segment"   : artist.get("segment", ""),
-            "source_platform"    : "YouTube",
-            "country_detected"   : artist.get("country", ""),
-            "channel_subscribers": str(artist.get("subscriber_count", 0)),
+            "prospect_score"      : str(round(artist.get("score", 0), 1)),
+            "prospect_segment"    : artist.get("segment", ""),
+            "contact_type"        : enrichment.get("contact_type", "artist"),
+            "source_platform"     : "YouTube",
+            "video_views"         : str(artist.get("video_views", 0)),
+            "channel_subscribers" : str(artist.get("subscriber_count", 0)),
+            "latest_video_url"    : artist.get("latest_video_url", ""),
+            "spr_score"           : str(round(artist.get("spr_score", 0), 2)),
         }
 
-        # Données enrichies par Google Search
-        if enrichment.get("spotify_url"):
-            props["spotify_url"] = enrichment["spotify_url"]
-        if enrichment.get("apple_music_url"):
-            props["apple_music_url"] = enrichment["apple_music_url"]
-        if enrichment.get("label"):
-            props["label"] = enrichment["label"]
-
-        # Supprimer les valeurs vides pour ne pas écraser
-        # des données existantes dans HubSpot
-        return {k: v for k, v in props.items() if v}
+        # Supprimer les valeurs vides pour ne pas écraser HubSpot
+        return {k: v for k, v in props.items() if v and v != "0" and v != "0.0"}
 
     def _find_by_email(self, email: str) -> str | None:
-        """Cherche un contact HubSpot par email. Retourne l'ID ou None."""
+        """Recherche un contact HubSpot par email."""
         try:
             result = self._client.crm.contacts.search_api.do_search(
                 public_object_search_request={
@@ -217,7 +208,6 @@ class HubSpotClient:
         return None
 
     def _save_hubspot_id(self, channel_id: str, hubspot_id: str):
-        """Sauvegarde l'ID HubSpot en base pour les futures mises à jour."""
         with get_db() as conn:
             conn.execute(text("""
                 UPDATE artists SET
@@ -227,10 +217,7 @@ class HubSpotClient:
             """), {"channel_id": channel_id, "hubspot_id": hubspot_id})
 
     def _get_artists_to_sync(self) -> list[dict]:
-        """
-        Récupère les artistes qualifiés à synchroniser
-        avec leur dernier score et segment.
-        """
+        """Récupère les artistes qualifiés avec leurs métriques."""
         with get_db() as conn:
             result = conn.execute(text("""
                 SELECT
@@ -243,15 +230,30 @@ class HubSpotClient:
                     a.hubspot_contact_id,
                     a.enrichment_data,
                     s.score,
-                    s.segment
+                    s.segment,
+                    MAX(v.view_count)  as video_views,
+                    MAX(v.video_id)    as latest_video_id
                 FROM artists a
                 LEFT JOIN LATERAL (
                     SELECT score, segment FROM scores
                     WHERE channel_id = a.channel_id
-                    ORDER BY calculated_at DESC
-                    LIMIT 1
+                    ORDER BY calculated_at DESC LIMIT 1
                 ) s ON true
+                LEFT JOIN videos v ON a.channel_id = v.channel_id
                 WHERE a.status = 'qualified'
+                GROUP BY
+                    a.channel_id, a.artist_name, a.email, a.website,
+                    a.country, a.subscriber_count, a.hubspot_contact_id,
+                    a.enrichment_data, s.score, s.segment
                 ORDER BY s.score DESC NULLS LAST
             """))
-            return [dict(row._mapping) for row in result.fetchall()]
+            artists = [dict(row._mapping) for row in result.fetchall()]
+
+        # Construire l'URL de la dernière vidéo
+        for a in artists:
+            if a.get("latest_video_id"):
+                a["latest_video_url"] = (
+                    f"https://youtube.com/watch?v={a['latest_video_id']}"
+                )
+
+        return artists

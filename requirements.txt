@@ -20,6 +20,9 @@ uvicorn==0.29.0
 # Google Search
 requests==2.31.0
 
+# Spotify
+spotipy>=2.23.0
+
 # HubSpot
 hubspot-api-client>=8.2.1
 

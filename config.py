@@ -52,6 +52,11 @@ CELERY_RESULT_BACKEND = REDIS_URL
 SCAN_INTERVAL_HOURS  = 6       # Fréquence des scans automatiques
 
 
+# ── Spotify API ────────────────────────────────────────────────────────
+SPOTIFY_CLIENT_ID     = os.getenv("SPOTIFY_CLIENT_ID", "")
+SPOTIFY_CLIENT_SECRET = os.getenv("SPOTIFY_CLIENT_SECRET", "")
+
+
 # ── Google Custom Search ───────────────────────────────────────────────
 GOOGLE_SEARCH_API_KEY = os.getenv("GOOGLE_SEARCH_API_KEY", "")
 GOOGLE_SEARCH_CX      = os.getenv("GOOGLE_SEARCH_CX", "")
