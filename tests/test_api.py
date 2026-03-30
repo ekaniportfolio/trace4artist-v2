@@ -287,3 +287,217 @@ class TestAlertsEndpoints:
             response = client.patch("/alerts/999/process")
 
         assert response.status_code == 404
+
+
+# ──────────────────────────────────────────────────────────────────────
+# TESTS : VIDÉOS RÉCENTES
+# ──────────────────────────────────────────────────────────────────────
+
+class TestRecentVideos:
+
+    def test_recent_videos_returns_list(self):
+        with patch("src.api.get_db") as mock_db:
+            mock_db.return_value = make_mock_conn([{
+                "video_id"    : "v1",
+                "title"       : "Clip Test",
+                "view_count"  : 50_000,
+                "like_count"  : 2_000,
+                "comment_count": 100,
+                "published_at": "2024-06-01T00:00:00Z",
+                "tracking_phase": "intensive",
+                "is_suspicious" : False,
+                "artist_name" : "Artiste Test",
+                "country"     : "CM",
+                "channel_id"  : "UCtest",
+                "spr"         : 2.5,
+                "latest_snapshot_views": 48_000,
+                "snapshot_at" : "2024-06-01T06:00:00Z",
+            }])
+            response = client.get("/videos/recent")
+
+        assert response.status_code == 200
+        assert isinstance(response.json(), list)
+
+    def test_recent_videos_phase_filter(self):
+        with patch("src.api.get_db") as mock_db:
+            mock_db.return_value = make_mock_conn([])
+            response = client.get("/videos/recent?phase=intensive")
+
+        assert response.status_code == 200
+
+
+# ──────────────────────────────────────────────────────────────────────
+# TESTS : BOT CONTROL
+# ──────────────────────────────────────────────────────────────────────
+
+class TestBotControl:
+
+    def test_bot_status_returns_expected_keys(self):
+        from datetime import datetime, timezone, timedelta
+        completed = datetime.now(timezone.utc) - timedelta(hours=2)
+        with patch("src.api.get_db") as mock_db:
+            mock_conn = MagicMock()
+            # completed_at doit être un vrai datetime pour la comparaison timedelta
+            mock_row = MagicMock()
+            mock_row.__getitem__ = lambda s, i: [
+                "completed", "incremental",
+                datetime.now(timezone.utc), completed, None, 42, 102
+            ][i]
+            mock_row._mapping = {
+                "status": "completed", "scan_type": "incremental",
+                "started_at": datetime.now(timezone.utc),
+                "completed_at": completed,
+                "error_message": None, "videos_found": 42,
+                "quota_used": 102,
+            }
+            mock_row.__getattr__ = lambda s, k: mock_row._mapping.get(k)
+            # index 0 = status, index 3 = completed_at
+            mock_row.__iter__ = lambda s: iter(mock_row._mapping.values())
+            mock_conn.execute.return_value.fetchone.return_value = mock_row
+            mock_conn.execute.return_value.fetchall.return_value = []
+            mock_conn.__enter__ = lambda s: mock_conn
+            mock_conn.__exit__  = MagicMock(return_value=False)
+            mock_db.return_value = mock_conn
+
+            response = client.get("/bot/status")
+
+        assert response.status_code == 200
+        data = response.json()
+        assert "status"     in data
+        assert "last_scan"  in data
+        assert "activity_24h" in data
+
+    def test_bot_schedule_returns_4_jobs(self):
+        with patch("src.api.get_db") as mock_db, \
+             patch("src.api.SettingsManager") as MockSM:
+
+            MockSM.return_value.get.side_effect = lambda k: {
+                "tracking.detection_hour"    : "0",
+                "tracking.intensive_interval": "6",
+            }[k]
+            MockSM.return_value.get_regions.return_value = ["CM", "NG"]
+            mock_db.return_value = make_mock_conn([])
+
+            response = client.get("/bot/schedule")
+
+        assert response.status_code == 200
+        data = response.json()
+        assert len(data["schedule"]) == 4
+
+    def test_bot_stop_returns_status(self):
+        with patch("src.api.get_db") as mock_db:
+            mock_db.return_value = make_mock_conn([])
+            response = client.post("/bot/stop")
+
+        assert response.status_code == 200
+        assert response.json()["status"] == "stop_requested"
+
+
+# ──────────────────────────────────────────────────────────────────────
+# TESTS : STATS HEBDOMADAIRES
+# ──────────────────────────────────────────────────────────────────────
+
+class TestWeeklyStats:
+
+    def test_weekly_stats_returns_expected_keys(self):
+        with patch("src.api.get_db") as mock_db:
+            mock_conn = MagicMock()
+            mock_conn.execute.return_value.fetchall.return_value = []
+            mock_conn.execute.return_value.fetchone.return_value = None
+            mock_conn.__enter__ = lambda s: mock_conn
+            mock_conn.__exit__  = MagicMock(return_value=False)
+            mock_db.return_value = mock_conn
+
+            response = client.get("/stats/weekly")
+
+        assert response.status_code == 200
+        data = response.json()
+        assert "videos_by_day"    in data
+        assert "quota_by_day"     in data
+        assert "qualified_by_day" in data
+        assert "comparison"       in data
+
+    def test_weekly_comparison_has_growth_rate(self):
+        with patch("src.api.get_db") as mock_db:
+            mock_conn = MagicMock()
+            mock_conn.execute.return_value.fetchall.return_value = []
+            mock_conn.execute.return_value.fetchone.return_value = None
+            mock_conn.__enter__ = lambda s: mock_conn
+            mock_conn.__exit__  = MagicMock(return_value=False)
+            mock_db.return_value = mock_conn
+
+            response = client.get("/stats/weekly")
+
+        comparison = response.json()["comparison"]
+        assert "growth_rate" in comparison
+
+
+# ──────────────────────────────────────────────────────────────────────
+# TESTS : SANTÉ DES APIS
+# ──────────────────────────────────────────────────────────────────────
+
+class TestApiHealth:
+
+    def test_api_health_returns_all_services(self):
+        with patch("src.api.get_db") as mock_db, \
+             patch("config.YOUTUBE_API_KEY", "fake_key"), \
+             patch("config.HUBSPOT_API_KEY", "fake_key"), \
+             patch("config.SPOTIFY_CLIENT_ID", "fake_id"), \
+             patch("config.GOOGLE_SEARCH_API_KEY", "fake_key"):
+
+            mock_conn = MagicMock()
+            mock_conn.execute.return_value.fetchone.return_value = \
+                MagicMock(_mapping={"calls_today": 5, "units_today": 500})
+            mock_conn.__enter__ = lambda s: mock_conn
+            mock_conn.__exit__  = MagicMock(return_value=False)
+            mock_db.return_value = mock_conn
+
+            response = client.get("/stats/api-health")
+
+        assert response.status_code == 200
+        data = response.json()
+        assert "overall" in data
+        assert "youtube"       in data["apis"]
+        assert "hubspot"       in data["apis"]
+        assert "spotify"       in data["apis"]
+        assert "google_search" in data["apis"]
+
+    def test_api_health_not_configured(self):
+        with patch("src.api.get_db") as mock_db, \
+             patch("config.YOUTUBE_API_KEY", ""), \
+             patch("config.HUBSPOT_API_KEY", ""), \
+             patch("config.SPOTIFY_CLIENT_ID", ""), \
+             patch("config.GOOGLE_SEARCH_API_KEY", ""):
+
+            mock_conn = MagicMock()
+            mock_conn.execute.return_value.fetchone.return_value = \
+                MagicMock(_mapping={"calls_today": 0, "units_today": 0})
+            mock_conn.__enter__ = lambda s: mock_conn
+            mock_conn.__exit__  = MagicMock(return_value=False)
+            mock_db.return_value = mock_conn
+
+            response = client.get("/stats/api-health")
+
+        assert response.status_code == 200
+        assert response.json()["overall"] == "partial"
+
+
+# ──────────────────────────────────────────────────────────────────────
+# TESTS : STATS COMMERCIALES HUBSPOT
+# ──────────────────────────────────────────────────────────────────────
+
+class TestCommercialStats:
+
+    def test_returns_not_configured_without_hubspot(self):
+        with patch("config.HUBSPOT_API_KEY", ""):
+            response = client.get("/stats/commercial")
+
+        assert response.status_code == 200
+        assert response.json()["status"] == "not_configured"
+
+    def test_weekly_returns_not_configured_without_hubspot(self):
+        with patch("config.HUBSPOT_API_KEY", ""):
+            response = client.get("/stats/commercial/weekly")
+
+        assert response.status_code == 200
+        assert response.json()["status"] == "not_configured"
