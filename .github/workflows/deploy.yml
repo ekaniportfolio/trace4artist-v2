@@ -1,20 +1,17 @@
-name: CI/CD — Tests + Deploy
+name: CI/CD
 
 on:
   push:
-    branches: [ master ]
+    branches: [ master, main ]
   pull_request:
-    branches: [ master ]
+    branches: [ master, main ]
 
 env:
-  PROJECT_ID:   ${{ secrets.GCP_PROJECT_ID }}
-  REGION:       europe-west1
-  IMAGE:        trace4artist
+  PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
+  REGION:     europe-west1
+  IMAGE:      trace4artist
 
 jobs:
-  # ──────────────────────────────────────────────────────────────────
-  # Job 1 : Tests (toujours lancés)
-  # ──────────────────────────────────────────────────────────────────
   test:
     name: Tests
     runs-on: ubuntu-latest
@@ -29,26 +26,22 @@ jobs:
           python-version: "3.11"
 
       - name: Install dependencies
-        run: |
-          pip install -r requirements.txt
+        run: pip install -r requirements.txt
 
       - name: Run tests
         env:
-          YOUTUBE_API_KEY:      fake-key-for-testing
-          SPOTIFY_CLIENT_ID:    fake-spotify-id
+          YOUTUBE_API_KEY:       fake-key-for-testing
+          SPOTIFY_CLIENT_ID:     fake-spotify-id
           SPOTIFY_CLIENT_SECRET: fake-spotify-secret
-          DATABASE_URL:         postgresql://fake:fake@localhost/fake
-          REDIS_URL:            redis://localhost:6379/0
+          DATABASE_URL:          postgresql://fake:fake@localhost/fake
+          REDIS_URL:             redis://localhost:6379/0
         run: pytest
 
-  # ──────────────────────────────────────────────────────────────────
-  # Job 2 : Build + Deploy (uniquement sur push master, après tests OK)
-  # ──────────────────────────────────────────────────────────────────
   deploy:
     name: Deploy to Cloud Run
     runs-on: ubuntu-latest
-    needs: test                          # Attend que les tests passent
-    if: github.event_name == 'push'      # Pas sur les pull requests
+    needs: test
+    if: github.event_name == 'push'
 
     steps:
       - name: Checkout
@@ -78,16 +71,13 @@ jobs:
           docker push ${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.IMAGE }}/${{ env.IMAGE }}:${{ github.sha }}
           docker push ${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.IMAGE }}/${{ env.IMAGE }}:latest
 
-      # ── Déployer les 3 services ──────────────────────────────────
-
       - name: Deploy API service
         uses: google-github-actions/deploy-cloudrun@v2
         with:
           service: trace4artist-api
           region:  ${{ env.REGION }}
           image:   ${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.IMAGE }}/${{ env.IMAGE }}:${{ github.sha }}
-          env_vars: |
-            MODE=api
+          env_vars: MODE=api
           secrets: |
             YOUTUBE_API_KEY=YOUTUBE_API_KEY:latest
             DATABASE_URL=DATABASE_URL:latest
@@ -104,8 +94,7 @@ jobs:
           service: trace4artist-scheduler
           region:  ${{ env.REGION }}
           image:   ${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.IMAGE }}/${{ env.IMAGE }}:${{ github.sha }}
-          env_vars: |
-            MODE=scheduler
+          env_vars: MODE=scheduler
           secrets: |
             YOUTUBE_API_KEY=YOUTUBE_API_KEY:latest
             DATABASE_URL=DATABASE_URL:latest
@@ -122,8 +111,7 @@ jobs:
           service: trace4artist-worker
           region:  ${{ env.REGION }}
           image:   ${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.IMAGE }}/${{ env.IMAGE }}:${{ github.sha }}
-          env_vars: |
-            MODE=worker
+          env_vars: MODE=worker
           secrets: |
             YOUTUBE_API_KEY=YOUTUBE_API_KEY:latest
             DATABASE_URL=DATABASE_URL:latest
@@ -131,7 +119,7 @@ jobs:
 
       - name: Show API URL
         run: |
-          echo "API déployée sur :"
+          echo "API deployee sur :"
           gcloud run services describe trace4artist-api \
             --region=${{ env.REGION }} \
             --format='value(status.url)'
