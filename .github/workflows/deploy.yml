@@ -92,7 +92,9 @@ jobs:
           service: trace4artist-api
           region:  ${{ env.REGION }}
           image:   ${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.IMAGE }}/${{ env.IMAGE }}:${{ github.sha }}
-          env_vars: MODE=api
+          env_vars: |
+            MODE=api
+            PORT=8080
           secrets: |
             YOUTUBE_API_KEY=YOUTUBE_API_KEY:latest
             DATABASE_URL=DATABASE_URL:latest

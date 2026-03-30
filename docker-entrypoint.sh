@@ -10,7 +10,7 @@ case "$MODE" in
         echo "Démarrage de l'API FastAPI..."
         exec uvicorn src.api:app \
             --host 0.0.0.0 \
-            --port "${PORT:-8000}" \
+            --port "${PORT:-8080}" \
             --workers 2 \
             --log-level info
         ;;

@@ -84,7 +84,7 @@ ACTIVATION_SCORE_THRESHOLD = 70
 
 # ── FastAPI ────────────────────────────────────────────────────────────
 API_HOST = os.getenv("API_HOST", "0.0.0.0")
-API_PORT = int(os.getenv("API_PORT", "8000"))
+API_PORT = int(os.getenv("PORT", "8080"))  # Cloud Run injecte PORT automatiquement
 
 
 # ── Validation ─────────────────────────────────────────────────────────
