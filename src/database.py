@@ -16,18 +16,19 @@ from config import DATABASE_URL
 # ── Engine principal ───────────────────────────────────────────────────
 # pool_pre_ping=True : vérifie que la connexion est vivante avant usage
 # (indispensable pour les connexions longue durée avec un scheduler)
-# Déterminer si on utilise Supabase pooler (port 6543)
-# Le pooler Supabase nécessite SSL et ne supporte pas les transactions
-_is_pooler = ":6543" in (DATABASE_URL or "")
+# SSL activé si l'URL contient sslmode=require
+# ou si on est sur Supabase (détection par le domaine)
+_needs_ssl = (
+    "supabase.co" in (DATABASE_URL or "")
+    or "sslmode=require" in (DATABASE_URL or "")
+)
 
 engine = create_engine(
     DATABASE_URL,
     pool_pre_ping=True,
     pool_size=5,
     max_overflow=10,
-    connect_args={
-        "sslmode": "require",
-    } if _is_pooler else {},
+    connect_args={"sslmode": "require"} if _needs_ssl else {},
 )
 
 
