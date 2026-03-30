@@ -1,5 +1,5 @@
 #!/bin/sh
-# docker-entrypoint.sh — Détermine ce qui démarre selon MODE
+# docker-entrypoint.sh
 
 set -e
 

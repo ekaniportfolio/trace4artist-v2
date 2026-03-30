@@ -426,6 +426,13 @@ class PassiveMonitoringJob:
 # ──────────────────────────────────────────────────────────────────────────────
 
 def start_scheduler():
+    # Démarrer le health check HTTP pour Cloud Run
+    import os
+    from src.health_server import start_health_server
+    port = int(os.getenv("PORT", "8080"))
+    start_health_server(port)
+    print(f"Health check server démarré sur port {port}")
+
     """
     Configure et démarre les 4 jobs APScheduler.
 

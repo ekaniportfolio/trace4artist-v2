@@ -92,9 +92,7 @@ jobs:
           service: trace4artist-api
           region:  ${{ env.REGION }}
           image:   ${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.IMAGE }}/${{ env.IMAGE }}:${{ github.sha }}
-          env_vars: |
-            MODE=api
-            PORT=8080
+          env_vars: MODE=api
           secrets: |
             YOUTUBE_API_KEY=YOUTUBE_API_KEY:latest
             DATABASE_URL=DATABASE_URL:latest
@@ -111,6 +109,10 @@ jobs:
           service: trace4artist-scheduler
           region:  ${{ env.REGION }}
           image:   ${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.IMAGE }}/${{ env.IMAGE }}:${{ github.sha }}
+          flags: >-
+            --no-cpu-throttling
+            --min-instances=1
+            --port=8080
           env_vars: MODE=scheduler
           secrets: |
             YOUTUBE_API_KEY=YOUTUBE_API_KEY:latest
@@ -128,6 +130,10 @@ jobs:
           service: trace4artist-worker
           region:  ${{ env.REGION }}
           image:   ${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.IMAGE }}/${{ env.IMAGE }}:${{ github.sha }}
+          flags: >-
+            --no-cpu-throttling
+            --min-instances=1
+            --port=8080
           env_vars: MODE=worker
           secrets: |
             YOUTUBE_API_KEY=YOUTUBE_API_KEY:latest
