@@ -16,16 +16,13 @@ case "$MODE" in
         ;;
 
     scheduler)
-        echo "Démarrage du Scheduler APScheduler..."
+        echo "Démarrage du Scheduler + Health Server..."
         exec python -m src.scheduler
         ;;
 
     worker)
-        echo "Démarrage du Celery Worker..."
-        exec celery -A src.worker worker \
-            --loglevel=info \
-            --concurrency=4 \
-            --queues=celery
+        echo "Démarrage du Worker Celery + Health Server..."
+        exec python -c "from src.worker import start_worker; start_worker()"
         ;;
 
     *)

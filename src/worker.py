@@ -97,8 +97,8 @@ def enrich_artists():
     Enrichit les profils d artistes via Google Custom Search.
     Branché sur GoogleSearchEnricher depuis l Étape 6.
     """
-    from src.enricher import GoogleSearchEnricher
-    enricher = GoogleSearchEnricher()
+    from src.enricher import ArtistEnricher
+    enricher = ArtistEnricher()
     results  = enricher.enrich_qualified_artists()
     enriched = sum(1 for r in results if r.success)
     logger.info(f"Enrichissement : {enriched}/{len(results)} artistes enrichis")
@@ -124,3 +124,23 @@ def sync_to_hubspot():
     except ValueError as e:
         logger.warning(f"HubSpot non configuré : {e}")
         return {"synced": 0, "status": "not_configured"}
+
+
+# ──────────────────────────────────────────────────────────────────────
+# DÉMARRAGE DIRECT (python -m src.worker ou via entrypoint)
+# Lance le health server pour Cloud Run avant Celery
+# ──────────────────────────────────────────────────────────────────────
+
+def start_worker():
+    """Démarre le health server puis le worker Celery."""
+    import os
+    from src.health_server import start_health_server
+    port = int(os.getenv("PORT", "8080"))
+    start_health_server(port)
+    print(f"Health check server démarré sur port {port}")
+    celery_app.worker_main([
+        "worker",
+        "--loglevel=info",
+        "--concurrency=4",
+        "--queues=celery",
+    ])
