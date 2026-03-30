@@ -30,11 +30,26 @@ logger = logging.getLogger(__name__)
 # Valeurs par défaut issues de config.py
 # Utilisées si PostgreSQL est inaccessible ou si la clé n'existe pas
 DEFAULTS = {
+    # Paramètres de scan
     "scan.lookback_days" : str(INITIAL_LOOKBACK_DAYS),
     "scan.interval_hours": str(SCAN_INTERVAL_HOURS),
     "scan.regions"       : ",".join(TARGET_REGIONS),
     "scan.max_results"   : str(MAX_RESULTS_PER_SEARCH),
     "scan.keywords"      : SEARCH_KEYWORDS,
+
+    # Paramètres de tracking tiered (migration 004)
+    "tracking.detection_hour"    : "0",
+    "tracking.intensive_interval": "6",
+    "tracking.intensive_max_days": "7",
+    "tracking.growth_max_days"   : "90",
+    "tracking.passive_max_days"  : "180",
+    "tracking.keep_qualified"    : "true",
+    "tracking.breakout_threshold": "0.20",
+
+    # Paramètres d'enrichissement (migration 005 + 006)
+    "enrichment.enabled"              : "true",
+    "enrichment.spotify_enabled"      : "true",
+    "enrichment.spotify_min_popularity": "10",
 }
 
 
@@ -149,7 +164,12 @@ class SettingsManager:
         Valide la valeur avant de l'écrire en base.
         Lève ValueError avec un message clair si invalide.
         """
-        if key in ("scan.lookback_days", "scan.interval_hours", "scan.max_results"):
+        if key in (
+            "scan.lookback_days", "scan.interval_hours", "scan.max_results",
+            "tracking.intensive_interval", "tracking.intensive_max_days",
+            "tracking.growth_max_days", "tracking.passive_max_days",
+            "tracking.detection_hour",
+        ):
             try:
                 int_val = int(value)
             except ValueError:
