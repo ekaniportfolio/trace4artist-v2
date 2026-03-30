@@ -14,9 +14,9 @@
 FROM python:3.11-slim
 
 # ── Variables d'environnement ──────────────────────────────────────────
+# ENV PORT=8000  <-- À SUPPRIMER
 ENV PYTHONDONTWRITEBYTECODE=1 \
-    PYTHONUNBUFFERED=1        \
-    PORT=8000                 \
+    PYTHONUNBUFFERED=1 \
     MODE=api
 
 # PYTHONDONTWRITEBYTECODE : pas de fichiers .pyc
