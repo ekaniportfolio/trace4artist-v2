@@ -1,0 +1,35 @@
+# .dockerignore — Fichiers exclus de l'image Docker
+# Même logique que .gitignore : on n'embarque pas ce qui est inutile
+# ou dangereux dans l'image
+
+# Secrets — JAMAIS dans une image Docker
+.env
+*.env
+
+# Dépendances locales — reconstruites dans l'image
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+
+# Tests — pas nécessaires en production
+tests/
+pytest.ini
+.pytest_cache/
+
+# Docker lui-même
+docker-compose.yml
+Dockerfile
+.dockerignore
+
+# Git
+.git/
+.gitignore
+.github/
+
+# Données locales
+data/
+exports/
+
+# Documentation
+*.md
