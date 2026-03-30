@@ -599,17 +599,21 @@ def get_bot_status():
     # Déterminer l'état du bot
     if not last_scan:
         bot_status = "never_started"
-    elif last_scan[0] == "running":
-        bot_status = "running"
-    elif last_scan[0] == "failed":
-        bot_status = "error"
     else:
-        # Vérifier si le dernier scan date de moins de 12h
-        from datetime import timedelta
-        if last_scan[3]:  # completed_at
-            age = datetime.now(timezone.utc) - last_scan[3].replace(
-                tzinfo=timezone.utc
-            )
+        scan_dict = dict(last_scan._mapping)
+        status      = scan_dict.get("status")
+        completed_at = scan_dict.get("completed_at")
+
+        if status == "running":
+            bot_status = "running"
+        elif status == "failed":
+            bot_status = "error"
+        elif completed_at:
+            from datetime import timedelta
+            # S'assurer que completed_at est timezone-aware
+            if hasattr(completed_at, "replace") and completed_at.tzinfo is None:
+                completed_at = completed_at.replace(tzinfo=timezone.utc)
+            age = datetime.now(timezone.utc) - completed_at
             bot_status = "active" if age < timedelta(hours=12) else "idle"
         else:
             bot_status = "idle"

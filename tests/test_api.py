@@ -334,30 +334,20 @@ class TestBotControl:
 
     def test_bot_status_returns_expected_keys(self):
         from datetime import datetime, timezone, timedelta
+
         completed = datetime.now(timezone.utc) - timedelta(hours=2)
         with patch("src.api.get_db") as mock_db:
-            mock_conn = MagicMock()
-            # completed_at doit être un vrai datetime pour la comparaison timedelta
-            mock_row = MagicMock()
-            mock_row.__getitem__ = lambda s, i: [
-                "completed", "incremental",
-                datetime.now(timezone.utc), completed, None, 42, 102
-            ][i]
-            mock_row._mapping = {
-                "status": "completed", "scan_type": "incremental",
-                "started_at": datetime.now(timezone.utc),
-                "completed_at": completed,
-                "error_message": None, "videos_found": 42,
-                "quota_used": 102,
-            }
-            mock_row.__getattr__ = lambda s, k: mock_row._mapping.get(k)
-            # index 0 = status, index 3 = completed_at
-            mock_row.__iter__ = lambda s: iter(mock_row._mapping.values())
-            mock_conn.execute.return_value.fetchone.return_value = mock_row
-            mock_conn.execute.return_value.fetchall.return_value = []
-            mock_conn.__enter__ = lambda s: mock_conn
-            mock_conn.__exit__  = MagicMock(return_value=False)
-            mock_db.return_value = mock_conn
+            mock_db.return_value = make_mock_conn([{
+                "status"       : "completed",
+                "scan_type"    : "incremental",
+                "started_at"   : datetime.now(timezone.utc),
+                "completed_at" : completed,
+                "error_message": None,
+                "videos_found" : 42,
+                "quota_used"   : 102,
+                "count"        : 3,
+                "total_videos" : 120,
+            }])
 
             response = client.get("/bot/status")
 
