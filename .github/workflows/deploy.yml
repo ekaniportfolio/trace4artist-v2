@@ -92,6 +92,7 @@ jobs:
           service: trace4artist-api
           region:  ${{ env.REGION }}
           image:   ${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.IMAGE }}/${{ env.IMAGE }}:${{ github.sha }}
+          flags: --allow-unauthenticated
           env_vars: MODE=api
           secrets: |
             YOUTUBE_API_KEY=YOUTUBE_API_KEY:latest
