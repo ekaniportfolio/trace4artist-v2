@@ -70,13 +70,13 @@ def make_artist(**overrides) -> dict:
 class TestDisqualification:
 
     def test_too_few_subscribers(self, scorer):
-        result = scorer.score_artist(make_artist(subscriber_count=500))
+        result = scorer.score_artist(make_artist(subscriber_count=100))  # < 500
         assert result.is_qualified is False
         assert result.total_score  == 0.0
         assert "abonnés" in result.disqualification_reason.lower()
 
     def test_too_few_views(self, scorer):
-        result = scorer.score_artist(make_artist(videos=[make_video(500)]))
+        result = scorer.score_artist(make_artist(videos=[make_video(1000)]))  # < 5000
         assert result.is_qualified is False
         assert "vues" in result.disqualification_reason.lower()
 

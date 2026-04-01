@@ -68,8 +68,8 @@ HUBSPOT_API_KEY       = os.getenv("HUBSPOT_API_KEY", "")
 
 
 # ── Scoring v2 ─────────────────────────────────────────────────────────
-MIN_VIEWS             = 10_000
-MIN_SUBSCRIBERS       = 1_000
+MIN_VIEWS             = 5_000   # Ajusté selon les données réelles du marché africain
+MIN_SUBSCRIBERS       = 500    # Ajusté selon les données réelles du marché africain
 VELOCITY_WINDOW_DAYS  = 7       # Fenêtre de calcul de vélocité
 
 SCORE_SEGMENTS = {
@@ -84,7 +84,7 @@ ACTIVATION_SCORE_THRESHOLD = 70
 
 # ── FastAPI ────────────────────────────────────────────────────────────
 API_HOST = os.getenv("API_HOST", "0.0.0.0")
-API_PORT = int(os.getenv("PORT", "8080"))  # Cloud Run injecte PORT automatiquement
+API_PORT = int(os.getenv("API_PORT", "8000"))
 
 
 # ── Validation ─────────────────────────────────────────────────────────
