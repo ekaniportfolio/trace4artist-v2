@@ -177,7 +177,10 @@ class TestSearcherV2:
             "snippet"   : {"title": "Artiste", "description": ""},
             "statistics": {"subscriberCount": "20000", "viewCount": "500000", "videoCount": "30"},
             "brandingSettings": {"channel": {}},
+            "contentDetails": {"relatedPlaylists": {"uploads": "PL001"}},
         }]}
+        # _fetch_recent_videos fait un appel playlist — on le mock
+        mock_client.get_playlist_videos.return_value = {"items": []}
 
         searcher = ArtistSearcher(client=mock_client)
 
@@ -204,3 +207,111 @@ class TestSearcherV2:
         result   = searcher.process_batch([], [], "CM")
 
         assert result == {"saved_videos": 0, "new_artists": 0, "updated_artists": 0}
+
+    def test_fetch_recent_videos_called_for_new_artists(self):
+        """
+        _fetch_recent_videos doit être appelé uniquement
+        pour les nouveaux artistes (is_new = True).
+        """
+        from src.searcher import ArtistSearcher
+
+        mock_client = MagicMock()
+        mock_client.get_video_details.return_value = {"items": [{
+            "id"            : "vid001",
+            "snippet"       : {"title": "Clip", "publishedAt": "2024-01-01T00:00:00Z"},
+            "statistics"    : {"viewCount": "50000", "likeCount": "1000", "commentCount": "50"},
+            "contentDetails": {"duration": "PT3M"},
+        }]}
+        mock_client.get_channel_details.return_value = {"items": [{
+            "id"        : "UCnew",
+            "snippet"   : {"title": "Nouvel Artiste", "description": ""},
+            "statistics": {"subscriberCount": "5000", "viewCount": "100000", "videoCount": "10"},
+            "brandingSettings": {"channel": {}},
+            "contentDetails": {"relatedPlaylists": {"uploads": "PL_new"}},
+        }]}
+        mock_client.get_playlist_videos.return_value = {"items": []}
+
+        searcher = ArtistSearcher(client=mock_client)
+
+        with patch("src.searcher.save_artist", return_value=True) as mock_save, \
+             patch("src.searcher.save_video"), \
+             patch("src.searcher.save_view_snapshot"), \
+             patch.object(searcher, "_fetch_recent_videos") as mock_fetch:
+
+            searcher.process_batch(["vid001"], ["UCnew"], "NG")
+
+        # Nouvel artiste → _fetch_recent_videos appelé
+        mock_fetch.assert_called_once_with("UCnew")
+
+    def test_fetch_recent_videos_not_called_for_existing_artists(self):
+        """
+        _fetch_recent_videos ne doit PAS être appelé
+        pour les artistes déjà connus (is_new = False).
+        """
+        from src.searcher import ArtistSearcher
+
+        mock_client = MagicMock()
+        mock_client.get_video_details.return_value = {"items": [{
+            "id"            : "vid002",
+            "snippet"       : {"title": "Clip", "publishedAt": "2024-01-01T00:00:00Z"},
+            "statistics"    : {"viewCount": "30000", "likeCount": "800", "commentCount": "30"},
+            "contentDetails": {"duration": "PT3M"},
+        }]}
+        mock_client.get_channel_details.return_value = {"items": [{
+            "id"        : "UCexist",
+            "snippet"   : {"title": "Artiste Existant", "description": ""},
+            "statistics": {"subscriberCount": "8000", "viewCount": "200000", "videoCount": "20"},
+            "brandingSettings": {"channel": {}},
+            "contentDetails": {"relatedPlaylists": {"uploads": "PL_exist"}},
+        }]}
+
+        searcher = ArtistSearcher(client=mock_client)
+
+        with patch("src.searcher.save_artist", return_value=False), \
+             patch("src.searcher.save_video"), \
+             patch("src.searcher.save_view_snapshot"), \
+             patch.object(searcher, "_fetch_recent_videos") as mock_fetch:
+
+            searcher.process_batch(["vid002"], ["UCexist"], "CM")
+
+        # Artiste existant → _fetch_recent_videos PAS appelé
+        mock_fetch.assert_not_called()
+
+    def test_fetch_recent_videos_fails_silently(self):
+        """
+        _fetch_recent_videos ne doit pas planter le scan
+        si l'API YouTube retourne une erreur.
+        """
+        from src.searcher import ArtistSearcher
+
+        mock_client = MagicMock()
+        # Simuler une erreur sur get_channel_details dans _fetch_recent_videos
+        mock_client.get_channel_details.side_effect = [
+            # Premier appel (process_batch) → succès
+            {"items": [{
+                "id": "UCtest",
+                "snippet": {"title": "Test", "description": ""},
+                "statistics": {"subscriberCount": "1000", "viewCount": "50000", "videoCount": "5"},
+                "brandingSettings": {"channel": {}},
+                "contentDetails": {"relatedPlaylists": {"uploads": "PL_test"}},
+            }]},
+            # Deuxième appel (_fetch_recent_videos) → erreur
+            Exception("API Error"),
+        ]
+        mock_client.get_video_details.return_value = {"items": [{
+            "id"            : "vid003",
+            "snippet"       : {"title": "Test", "publishedAt": "2024-01-01T00:00:00Z"},
+            "statistics"    : {"viewCount": "10000", "likeCount": "200", "commentCount": "10"},
+            "contentDetails": {"duration": "PT2M"},
+        }]}
+
+        searcher = ArtistSearcher(client=mock_client)
+
+        with patch("src.searcher.save_artist", return_value=True), \
+             patch("src.searcher.save_video"), \
+             patch("src.searcher.save_view_snapshot"):
+
+            # Ne doit pas lever d'exception
+            result = searcher.process_batch(["vid003"], ["UCtest"], "KE")
+
+        assert result["saved_videos"] == 1

@@ -195,6 +195,7 @@ class YouTubeClient:
     def get_channel_details(self, channel_ids: list) -> dict:
         """
         Infos de chaînes (channels.list — 1 unité).
+        Inclut contentDetails pour accéder à la playlist uploads.
         Cache Redis : TTL 6h. Les infos de chaîne changent rarement
         — inutile de les refetcher à chaque scan.
         """
@@ -209,11 +210,37 @@ class YouTubeClient:
         ids_str = ",".join(channel_ids[:50])
         service = self._get_service()
         request = service.channels().list(
-            part = "snippet,statistics,brandingSettings,topicDetails",
+            part = "snippet,statistics,brandingSettings,topicDetails,contentDetails",
             id   = ids_str,
         )
         response = self._execute("channels.list", request)
         self._cache_set(cache_key, response)
+        return response
+
+    def get_playlist_videos(
+        self,
+        playlist_id: str,
+        max_results : int = 5,
+    ) -> dict:
+        """
+        Récupère les dernières vidéos d'une playlist (playlistItems.list — 1 unité).
+        Utilisé pour récupérer les vidéos récentes d'un artiste via sa
+        playlist uploads, afin de calculer la régularité dès le premier scoring.
+        """
+        cache_key = f"playlist:{playlist_id}:{max_results}"
+        cached    = self._cache_get(cache_key)
+        if cached:
+            return cached
+
+        service = self._get_service()
+        request = service.playlistItems().list(
+            part       = "contentDetails",
+            playlistId = playlist_id,
+            maxResults = min(max_results, 10),
+        )
+        response = self._execute("playlistItems.list", request)
+        # Cache court — 1h car les nouvelles vidéos apparaissent souvent
+        self._cache_set(cache_key, response, ttl=3600)
         return response
 
     def get_quota_status(self) -> dict:

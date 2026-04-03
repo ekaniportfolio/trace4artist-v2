@@ -80,6 +80,9 @@ class ArtistSearcher:
 
                 if is_new:
                     new_artists += 1
+                    # Récupérer les 5 dernières vidéos de la chaîne pour
+                    # permettre le calcul de régularité dès le premier scoring
+                    self._fetch_recent_videos(channel_id)
                 else:
                     updated_artists += 1
                 seen_channels.add(channel_id)
@@ -173,6 +176,63 @@ class ArtistSearcher:
     # ──────────────────────────────────────────────────────────────────
     # UTILITAIRES
     # ──────────────────────────────────────────────────────────────────
+
+    def _fetch_recent_videos(self, channel_id: str, max_videos: int = 5):
+        """
+        Récupère les N dernières vidéos d'une chaîne nouvellement découverte.
+        Permet au scorer de calculer la régularité des publications
+        dès le premier passage (évite regularity = 0 par manque de données).
+
+        Coût quota : 1 unité (playlistItems.list) + 1 unité (videos.list)
+        Appelé uniquement pour les nouveaux artistes (is_new = True).
+        """
+        try:
+            # Récupérer l'uploads playlist ID de la chaîne
+            channel_resp = self.client.get_channel_details([channel_id])
+            channel_items = channel_resp.get("items", [])
+            if not channel_items:
+                return
+
+            uploads_playlist = (
+                channel_items[0]
+                .get("contentDetails", {})
+                .get("relatedPlaylists", {})
+                .get("uploads", "")
+            )
+            if not uploads_playlist:
+                return
+
+            # Récupérer les dernières vidéos via la playlist uploads
+            playlist_resp = self.client.get_playlist_videos(
+                playlist_id = uploads_playlist,
+                max_results = max_videos,
+            )
+            items = playlist_resp.get("items", [])
+            if not items:
+                return
+
+            recent_video_ids = [
+                item["contentDetails"]["videoId"]
+                for item in items
+                if item.get("contentDetails", {}).get("videoId")
+            ]
+            if not recent_video_ids:
+                return
+
+            # Récupérer les stats de ces vidéos et les sauvegarder
+            videos_resp = self.client.get_video_details(recent_video_ids)
+            for item in videos_resp.get("items", []):
+                vid_id = item["id"]
+                parsed = self._parse_video(vid_id, channel_id, item)
+                save_video(parsed)
+                save_view_snapshot(vid_id, parsed["view_count"])
+
+        except Exception as e:
+            # Non bloquant — la vidéo principale est déjà sauvegardée
+            import logging
+            logging.getLogger(__name__).warning(
+                f"[{channel_id}] _fetch_recent_videos échoué : {e}"
+            )
 
     @staticmethod
     def _index_by_id(items: list) -> dict:

@@ -24,9 +24,10 @@ INITIAL_LOOKBACK_DAYS    = 365
 
 DAILY_QUOTA_LIMIT        = 10_000
 QUOTA_COST               = {
-    "search.list"  : 100,
-    "videos.list"  : 1,
-    "channels.list": 1,
+    "search.list"       : 100,
+    "videos.list"       : 1,
+    "channels.list"     : 1,
+    "playlistItems.list": 1,
 }
 REQUEST_DELAY_SECONDS    = 0.5
 

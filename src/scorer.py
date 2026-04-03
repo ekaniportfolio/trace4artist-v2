@@ -410,6 +410,10 @@ class ArtistScorer:
             return [dict(row._mapping) for row in result.fetchall()]
 
     def _get_snapshots(self, channel_id: str) -> list[dict]:
+        # Calcul de la date de coupure en Python — évite le bug de
+        # SQLAlchemy avec INTERVAL ':param days' qui n'est pas interpolé
+        from datetime import datetime, timezone, timedelta
+        cutoff = datetime.now(timezone.utc) - timedelta(days=7)
         with get_db() as conn:
             result = conn.execute(text("""
                 SELECT vs.view_count, vs.like_count,
@@ -418,9 +422,9 @@ class ArtistScorer:
                 FROM view_snapshots vs
                 JOIN videos v ON vs.video_id = v.video_id
                 WHERE v.channel_id = :channel_id
-                  AND vs.snapped_at >= NOW() - INTERVAL '7 days'
+                  AND vs.snapped_at >= :cutoff
                 ORDER BY vs.snapped_at ASC
-            """), {"channel_id": channel_id})
+            """), {"channel_id": channel_id, "cutoff": cutoff})
             return [dict(row._mapping) for row in result.fetchall()]
 
     def _persist(self, result: ScoringResult):
