@@ -26,6 +26,10 @@ spotipy>=2.23.0
 # HubSpot
 hubspot-api-client>=8.2.1
 
+# Auth JWT
+python-jose[cryptography]>=3.3.0  # JWT encoding/decoding
+bcrypt>=4.0.0                      # Password hashing (direct, Python 3.12+ compatible)
+
 # Tests
 pytest==8.1.0
 httpx>=0.23.0,<0.28.0      # Requis par FastAPI TestClient

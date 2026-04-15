@@ -48,6 +48,9 @@ DEFAULTS = {
 
     # Paramètres d'enrichissement (migration 005 + 006)
     "enrichment.enabled"              : "true",
+
+    # Auth
+    "auth.jwt_expire_hours"       : "24",
     "enrichment.spotify_enabled"      : "true",
     "enrichment.spotify_min_popularity": "10",
 }

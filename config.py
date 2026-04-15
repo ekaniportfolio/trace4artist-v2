@@ -53,6 +53,11 @@ CELERY_RESULT_BACKEND = REDIS_URL
 SCAN_INTERVAL_HOURS  = 6       # Fréquence des scans automatiques
 
 
+# ── Auth JWT ───────────────────────────────────────────────────────────────
+JWT_SECRET_KEY         = os.getenv("JWT_SECRET_KEY", "trace4artist-dev-secret-change-in-prod")
+DEFAULT_ADMIN_PASSWORD = os.getenv("DEFAULT_ADMIN_PASSWORD", "Admin@T4A2025!")
+
+
 # ── Spotify API ────────────────────────────────────────────────────────
 SPOTIFY_CLIENT_ID     = os.getenv("SPOTIFY_CLIENT_ID", "")
 SPOTIFY_CLIENT_SECRET = os.getenv("SPOTIFY_CLIENT_SECRET", "")

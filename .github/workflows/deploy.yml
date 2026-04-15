@@ -103,6 +103,7 @@ jobs:
             SPOTIFY_CLIENT_SECRET=SPOTIFY_CLIENT_SECRET:latest
             GOOGLE_SEARCH_API_KEY=GOOGLE_SEARCH_API_KEY:latest
             GOOGLE_SEARCH_CX=GOOGLE_SEARCH_CX:latest
+            JWT_SECRET_KEY=JWT_SECRET_KEY:latest
 
       - name: Deploy Scheduler service
         uses: google-github-actions/deploy-cloudrun@v2

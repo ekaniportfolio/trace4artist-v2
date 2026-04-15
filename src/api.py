@@ -17,12 +17,19 @@ import logging
 from datetime import datetime, timezone
 from typing import Optional
 
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import FastAPI, HTTPException, Query, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from sqlalchemy import text
 
 from config import API_HOST, API_PORT, YOUTUBE_API_KEY, HUBSPOT_API_KEY, SPOTIFY_CLIENT_ID, GOOGLE_SEARCH_API_KEY
+from src.auth import (
+    TokenData, get_current_user, require_admin,
+    require_admin_or_technician, require_admin_or_manager,
+    verify_password, create_access_token, update_last_login,
+    get_user_by_email, get_user_by_id, get_all_users,
+    create_user, update_user, delete_user,
+)
 from src.database import get_db
 from src.settings_manager import SettingsManager
 
@@ -259,7 +266,7 @@ def get_scan_status():
 
 
 @app.post("/scan/trigger", tags=["Scan"])
-def trigger_scan(request: ScanTriggerRequest = None):
+def trigger_scan(request: ScanTriggerRequest = None, _: "TokenData" = Depends(require_admin_or_technician)):
     """
     Déclenche un scan de détection manuel via Celery.
     Utile pour tester ou lancer un scan hors planning.
@@ -316,7 +323,7 @@ def get_all_settings():
 
 
 @app.patch("/settings/{key}", tags=["Settings"])
-def update_setting(key: str, body: SettingUpdate):
+def update_setting(key: str, body: SettingUpdate, _: "TokenData" = Depends(require_admin_or_technician)):
     """
     Modifie un paramètre à chaud — sans redémarrage.
 
@@ -466,7 +473,7 @@ def get_alerts(
 
 
 @app.patch("/alerts/{alert_id}/process", tags=["Alertes"])
-def mark_alert_processed(alert_id: int):
+def mark_alert_processed(alert_id: int, _: "TokenData" = Depends(require_admin_or_manager)):
     """Marque une alerte comme traitée."""
     with get_db() as conn:
         result = conn.execute(text("""
@@ -706,7 +713,7 @@ def get_bot_schedule():
 
 
 @app.post("/bot/stop", tags=["Bot"])
-def stop_bot():
+def stop_bot(_: "TokenData" = Depends(require_admin_or_technician)):
     """
     Marque le bot comme arrêté en base.
     L'arrêt réel du scheduler se fait via Cloud Run (scale to 0).
@@ -724,7 +731,7 @@ def stop_bot():
 
 
 @app.post("/bot/start", tags=["Bot"])
-def start_bot():
+def start_bot(_: "TokenData" = Depends(require_admin_or_technician)):
     """
     Déclenche un scan de détection immédiat via Celery.
     """
@@ -1064,3 +1071,182 @@ def get_api_health():
         "overall": overall,
         "apis"   : results,
     }
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# INITIALISATION — Admin par défaut au démarrage de l'API
+# ──────────────────────────────────────────────────────────────────────────────
+
+from contextlib import asynccontextmanager
+
+@asynccontextmanager
+async def lifespan(app):
+    """Initialise le compte admin au démarrage si aucun utilisateur n'existe."""
+    from src.auth import init_default_admin
+    try:
+        init_default_admin()
+    except Exception as e:
+        logger.warning(f"Init admin ignorée (DB peut-être pas encore prête) : {e}")
+    yield
+
+# Réattacher le lifespan à l'app existante
+app.router.lifespan_context = lifespan
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# MODÈLES PYDANTIC — Auth + Users
+# ──────────────────────────────────────────────────────────────────────────────
+
+
+
+class LoginRequest(BaseModel):
+    email   : str
+    password: str
+
+
+class UserCreateRequest(BaseModel):
+    username : str
+    email    : str
+    full_name: str
+    password : str
+    role     : str = "technician"
+
+
+class UserUpdateRequest(BaseModel):
+    full_name: Optional[str] = None
+    role     : Optional[str] = None
+    is_active: Optional[bool] = None
+    password : Optional[str] = None
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# ROUTES — AUTHENTIFICATION
+# ──────────────────────────────────────────────────────────────────────────────
+
+@app.post("/auth/login", tags=["Auth"])
+def login(body: LoginRequest):
+    """
+    Authentifie un utilisateur et retourne un JWT token.
+    Le token est valide 24h et doit être envoyé dans le header :
+        Authorization: Bearer <token>
+    """
+    user = get_user_by_email(body.email)
+
+    if not user or not verify_password(body.password, user["password_hash"]):
+        raise HTTPException(
+            status_code = 401,
+            detail      = "Email ou mot de passe incorrect",
+        )
+
+    if not user["is_active"]:
+        raise HTTPException(
+            status_code = 403,
+            detail      = "Compte désactivé",
+        )
+
+    token = create_access_token(
+        user_id  = user["id"],
+        username = user["username"],
+        role     = user["role"],
+    )
+    update_last_login(user["id"])
+
+    return {
+        "access_token": token,
+        "token_type"  : "bearer",
+        "expires_in"  : 24 * 3600,
+        "user"        : {
+            "id"       : user["id"],
+            "username" : user["username"],
+            "email"    : user["email"],
+            "full_name": user["full_name"],
+            "role"     : user["role"],
+        },
+    }
+
+
+@app.get("/auth/me", tags=["Auth"])
+def get_me(current_user: TokenData = Depends(get_current_user)):
+    """Retourne le profil de l'utilisateur connecté."""
+    user = get_user_by_id(current_user.user_id)
+    if not user:
+        raise HTTPException(status_code=404, detail="Utilisateur introuvable")
+    return user
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# ROUTES — GESTION DES UTILISATEURS (admin only)
+# ──────────────────────────────────────────────────────────────────────────────
+
+@app.get("/users", tags=["Users"])
+def list_users(_: TokenData = Depends(require_admin)):
+    """Liste tous les utilisateurs. Réservé aux admins."""
+    return get_all_users()
+
+
+@app.post("/users", tags=["Users"], status_code=201)
+def create_new_user(
+    body: UserCreateRequest,
+    _   : TokenData = Depends(require_admin),
+):
+    """Crée un nouvel utilisateur. Réservé aux admins."""
+    try:
+        user = create_user(
+            username  = body.username,
+            email     = body.email,
+            full_name = body.full_name,
+            password  = body.password,
+            role      = body.role,
+        )
+        return user
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+
+
+@app.patch("/users/{user_id}", tags=["Users"])
+def update_existing_user(
+    user_id: int,
+    body   : UserUpdateRequest,
+    current: TokenData = Depends(require_admin),
+):
+    """
+    Modifie un utilisateur. Réservé aux admins.
+    Un admin ne peut pas désactiver son propre compte.
+    """
+    if user_id == current.user_id and body.is_active is False:
+        raise HTTPException(
+            status_code = 422,
+            detail      = "Impossible de désactiver votre propre compte",
+        )
+    try:
+        user = update_user(
+            user_id   = user_id,
+            full_name = body.full_name,
+            role      = body.role,
+            is_active = body.is_active,
+            password  = body.password,
+        )
+        if not user:
+            raise HTTPException(status_code=404, detail="Utilisateur introuvable")
+        return user
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+
+
+@app.delete("/users/{user_id}", tags=["Users"])
+def delete_existing_user(
+    user_id: int,
+    current: TokenData = Depends(require_admin),
+):
+    """
+    Supprime un utilisateur. Réservé aux admins.
+    Un admin ne peut pas supprimer son propre compte.
+    """
+    if user_id == current.user_id:
+        raise HTTPException(
+            status_code = 422,
+            detail      = "Impossible de supprimer votre propre compte",
+        )
+    if not delete_user(user_id):
+        raise HTTPException(status_code=404, detail="Utilisateur introuvable")
+    return {"status": "deleted", "id": user_id}
