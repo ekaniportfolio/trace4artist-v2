@@ -1250,3 +1250,63 @@ def delete_existing_user(
     if not delete_user(user_id):
         raise HTTPException(status_code=404, detail="Utilisateur introuvable")
     return {"status": "deleted", "id": user_id}
+
+# ──────────────────────────────────────────────────────────────────────────────
+# ENDPOINT DE REMEDIATION — A utiliser une seule fois pour les artistes
+# decouverts avant le fix "5 videos par artiste"
+# ──────────────────────────────────────────────────────────────────────────────
+
+@app.post("/admin/backfill-videos", tags=["Admin"], status_code=202)
+def backfill_videos(
+    limit: int = Query(default=50, ge=1, le=200),
+    _: TokenData = Depends(require_admin),
+):
+    """
+    Recupere les 5 dernieres videos pour les artistes qui n'en ont qu'une.
+    A appeler une seule fois pour corriger les artistes decouverts avant
+    le fix _fetch_recent_videos (v2.0.1).
+
+    - limit : nombre d'artistes a traiter par appel (defaut 50, max 200)
+    - Cout quota : 2 unites YouTube par artiste (channels.list + playlistItems.list)
+    - Appeler plusieurs fois si > 200 artistes a remedier
+    """
+    try:
+        from src.youtube_client import YouTubeClient
+        from src.searcher import ArtistSearcher
+
+        with get_db() as conn:
+            result = conn.execute(text("""
+                SELECT DISTINCT a.channel_id
+                FROM artists a
+                JOIN videos v ON a.channel_id = v.channel_id
+                WHERE a.status IN ('discovered', 'qualified', 'rejected')
+                GROUP BY a.channel_id
+                HAVING COUNT(v.video_id) = 1
+                LIMIT :limit
+            """), {"limit": limit})
+            channel_ids = [row[0] for row in result.fetchall()]
+
+        if not channel_ids:
+            return {"status": "ok", "message": "Aucun artiste a remedier", "processed": 0}
+
+        client   = YouTubeClient()
+        searcher = ArtistSearcher(client=client)
+        ok, fail = 0, 0
+
+        for channel_id in channel_ids:
+            try:
+                searcher._fetch_recent_videos(channel_id)
+                ok += 1
+            except Exception as e:
+                logger.warning(f"backfill {channel_id}: {e}")
+                fail += 1
+
+        return {
+            "status"    : "ok",
+            "processed" : ok,
+            "failed"    : fail,
+            "remaining" : "Appeler a nouveau si d'autres artistes restent",
+        }
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))

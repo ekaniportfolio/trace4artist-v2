@@ -37,7 +37,18 @@ logger = logging.getLogger(__name__)
 FAKE_VIEW_MIN_VIEWS      = 100_000
 FAKE_VIEW_MAX_ENGAGEMENT = 0.001
 FAKE_VIEW_SCORE_PENALTY  = 20
-BREAKOUT_THRESHOLD       = 0.20
+# BREAKOUT_THRESHOLD supprime — lu dynamiquement depuis SettingsManager
+# pour que la valeur en base (0.50) soit effectivement utilisee
+
+def _get_breakout_threshold() -> float:
+    """Lit le seuil de breakout depuis la base via SettingsManager.
+    Fallback a 0.50 si absent ou illisible.
+    """
+    try:
+        from src.settings_manager import SettingsManager
+        return float(SettingsManager().get("tracking.breakout_threshold"))
+    except Exception:
+        return 0.50
 
 
 @dataclass
@@ -122,7 +133,7 @@ class ArtistScorer:
         velocity_24h = self._compute_velocity_24h(snapshots)
         velocity_7d  = self._compute_velocity_7d(snapshots)
         breakout     = (
-            velocity_24h > BREAKOUT_THRESHOLD
+            velocity_24h > _get_breakout_threshold()
             and self._is_older_than(videos, 7)
         )
 
@@ -370,7 +381,7 @@ class ArtistScorer:
                 details    = {
                     "artist_name" : artist.get("artist_name"),
                     "velocity_24h": round(velocity_24h, 4),
-                    "threshold"   : BREAKOUT_THRESHOLD,
+                    "threshold"   : _get_breakout_threshold(),
                 },
             )
             logger.info(

@@ -44,7 +44,7 @@ DEFAULTS = {
     "tracking.growth_max_days"   : "90",
     "tracking.passive_max_days"  : "180",
     "tracking.keep_qualified"    : "true",
-    "tracking.breakout_threshold": "0.20",
+    "tracking.breakout_threshold": "0.50",  # Seuil mis a jour (etait 0.20)
 
     # Paramètres d'enrichissement (migration 005 + 006)
     "enrichment.enabled"              : "true",

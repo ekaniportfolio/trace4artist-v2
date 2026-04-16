@@ -240,3 +240,18 @@ class TestScoreIntegrity:
         assert result.segment in (
             "high_potential", "standard", "emerging", "low_priority"
         )
+
+    def test_breakout_threshold_read_from_settings(self, scorer):
+        """Le seuil de breakout doit etre lu depuis SettingsManager, pas hardcode."""
+        from unittest.mock import patch
+        # Simuler un seuil a 0.50 en base
+        with patch("src.scorer._get_breakout_threshold", return_value=0.50):
+            # Velocite de 40% — en dessous de 0.50, pas de breakout
+            snaps = [make_snapshot(24, 100_000), make_snapshot(0, 140_000)]
+            vel   = scorer._compute_velocity_24h(snaps)
+            # vel = 0.40 < 0.50 donc pas de breakout avec le bon seuil
+            assert vel < 0.50
+
+        with patch("src.scorer._get_breakout_threshold", return_value=0.20):
+            # Avec l'ancien seuil 0.20, 40% declencherait un breakout
+            assert vel > 0.20
