@@ -81,15 +81,16 @@ class YouTubeClient:
         except Exception:
             return None   # Redis indisponible → on continue sans cache
 
-    def _cache_set(self, key: str, value: dict):
+    def _cache_set(self, key: str, value: dict, ttl: int = None):
         """
-        Stocke un résultat dans Redis avec TTL configuré.
+        Stocke un résultat dans Redis.
+        ttl : durée en secondes (défaut : REDIS_CACHE_TTL global).
         Silencieux si Redis est indisponible.
         """
         try:
             self._get_redis().setex(
                 key,
-                REDIS_CACHE_TTL,
+                ttl if ttl is not None else REDIS_CACHE_TTL,
                 json.dumps(value),
             )
         except Exception:
