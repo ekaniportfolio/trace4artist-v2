@@ -11,8 +11,13 @@ from starlette.testclient import TestClient
 from unittest.mock import patch, MagicMock
 
 from src.api import app
+from src.auth import create_access_token
 
 client = TestClient(app)
+
+# Token admin valide pour les tests des routes protégées
+ADMIN_TOKEN   = create_access_token(user_id=1, username="admin", role="admin")
+ADMIN_HEADERS = {"Authorization": f"Bearer {ADMIN_TOKEN}"}
 
 
 # ──────────────────────────────────────────────────────────────────────
@@ -155,12 +160,18 @@ class TestSettingsEndpoints:
         assert isinstance(response.json(), list)
 
     def test_update_setting_valid(self):
-        with patch("src.api.SettingsManager") as MockSM:
+        with patch("src.auth.get_db") as mock_db,              patch("src.api.SettingsManager") as MockSM:
+            mock_conn = MagicMock()
+            mock_conn.execute.return_value.fetchone.return_value = (1, True)
+            mock_conn.__enter__ = lambda s: mock_conn
+            mock_conn.__exit__  = MagicMock(return_value=False)
+            mock_db.return_value = mock_conn
             MockSM.return_value.set.return_value = {
                 "key": "scan.lookback_days", "value": "30"
             }
             response = client.patch(
                 "/settings/scan.lookback_days",
+                headers=ADMIN_HEADERS,
                 json={"value": "30"},
             )
 
@@ -168,22 +179,34 @@ class TestSettingsEndpoints:
         assert response.json()["status"] == "updated"
 
     def test_update_setting_unknown_key(self):
-        with patch("src.api.SettingsManager") as MockSM:
+        with patch("src.auth.get_db") as mock_db,              patch("src.api.SettingsManager") as MockSM:
+            mock_conn = MagicMock()
+            mock_conn.execute.return_value.fetchone.return_value = (1, True)
+            mock_conn.__enter__ = lambda s: mock_conn
+            mock_conn.__exit__  = MagicMock(return_value=False)
+            mock_db.return_value = mock_conn
             MockSM.return_value.set.side_effect = \
                 KeyError("Paramètre inconnu")
             response = client.patch(
                 "/settings/scan.inexistant",
+                headers=ADMIN_HEADERS,
                 json={"value": "test"},
             )
 
         assert response.status_code == 404
 
     def test_update_setting_invalid_value(self):
-        with patch("src.api.SettingsManager") as MockSM:
+        with patch("src.auth.get_db") as mock_db,              patch("src.api.SettingsManager") as MockSM:
+            mock_conn = MagicMock()
+            mock_conn.execute.return_value.fetchone.return_value = (1, True)
+            mock_conn.__enter__ = lambda s: mock_conn
+            mock_conn.__exit__  = MagicMock(return_value=False)
+            mock_db.return_value = mock_conn
             MockSM.return_value.set.side_effect = \
                 ValueError("Doit être un entier")
             response = client.patch(
                 "/settings/scan.interval_hours",
+                headers=ADMIN_HEADERS,
                 json={"value": "pas_un_nombre"},
             )
 
@@ -264,27 +287,35 @@ class TestAlertsEndpoints:
         assert isinstance(response.json(), list)
 
     def test_mark_alert_processed(self):
-        with patch("src.api.get_db") as mock_db:
+        with patch("src.auth.get_db") as mock_auth_db,              patch("src.api.get_db") as mock_db:
             mock_conn = MagicMock()
-            mock_conn.execute.return_value.fetchone.return_value = (1,)
+            mock_conn.execute.return_value.fetchone.return_value = (1, True)
             mock_conn.__enter__ = lambda s: mock_conn
             mock_conn.__exit__  = MagicMock(return_value=False)
+            mock_auth_db.return_value = mock_conn
             mock_db.return_value = mock_conn
 
-            response = client.patch("/alerts/1/process")
+            response = client.patch("/alerts/1/process", headers=ADMIN_HEADERS)
 
         assert response.status_code == 200
         assert response.json()["status"] == "processed"
 
     def test_mark_alert_not_found(self):
-        with patch("src.api.get_db") as mock_db:
+        with patch("src.auth.get_db") as mock_auth_db,              patch("src.api.get_db") as mock_db:
+            # mock_auth_db retourne user actif
+            mock_auth_conn = MagicMock()
+            mock_auth_conn.execute.return_value.fetchone.return_value = (1, True)
+            mock_auth_conn.__enter__ = lambda s: mock_auth_conn
+            mock_auth_conn.__exit__  = MagicMock(return_value=False)
+            mock_auth_db.return_value = mock_auth_conn
+            # mock_db retourne None (alerte introuvable)
             mock_conn = MagicMock()
             mock_conn.execute.return_value.fetchone.return_value = None
             mock_conn.__enter__ = lambda s: mock_conn
             mock_conn.__exit__  = MagicMock(return_value=False)
             mock_db.return_value = mock_conn
 
-            response = client.patch("/alerts/999/process")
+            response = client.patch("/alerts/999/process", headers=ADMIN_HEADERS)
 
         assert response.status_code == 404
 
@@ -375,9 +406,14 @@ class TestBotControl:
         assert len(data["schedule"]) == 4
 
     def test_bot_stop_returns_status(self):
-        with patch("src.api.get_db") as mock_db:
+        with patch("src.auth.get_db") as mock_auth_db,              patch("src.api.get_db") as mock_db:
+            mock_conn = MagicMock()
+            mock_conn.execute.return_value.fetchone.return_value = (1, True)
+            mock_conn.__enter__ = lambda s: mock_conn
+            mock_conn.__exit__  = MagicMock(return_value=False)
+            mock_auth_db.return_value = mock_conn
             mock_db.return_value = make_mock_conn([])
-            response = client.post("/bot/stop")
+            response = client.post("/bot/stop", headers=ADMIN_HEADERS)
 
         assert response.status_code == 200
         assert response.json()["status"] == "stop_requested"
