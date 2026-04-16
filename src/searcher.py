@@ -179,28 +179,25 @@ class ArtistSearcher:
 
     def _fetch_recent_videos(self, channel_id: str, max_videos: int = 5):
         """
-        Récupère les N dernières vidéos d'une chaîne nouvellement découverte.
+        Récupère les N dernières vidéos d'une chaîne.
         Permet au scorer de calculer la régularité des publications
         dès le premier passage (évite regularity = 0 par manque de données).
 
         Coût quota : 1 unité (playlistItems.list) + 1 unité (videos.list)
-        Appelé uniquement pour les nouveaux artistes (is_new = True).
+
+        Note : la playlist uploads d'une chaîne YouTube suit toujours la règle :
+            channel_id  = UC + suffix  (ex. UCxxxxxxxxxxxxxxxxxxxxxxxx)
+            uploads_id  = UU + suffix  (ex. UUxxxxxxxxxxxxxxxxxxxxxxxx)
+        On dérive directement l'ID sans appel API supplémentaire — ce qui
+        évite le bug du cache Redis qui retournait d'anciennes réponses
+        sans le champ contentDetails.
         """
         try:
-            # Récupérer l'uploads playlist ID de la chaîne
-            channel_resp = self.client.get_channel_details([channel_id])
-            channel_items = channel_resp.get("items", [])
-            if not channel_items:
+            # Dériver l'uploads playlist ID directement depuis channel_id
+            # Règle YouTube : UCxxxxxx → UUxxxxxx (UC → UU)
+            if not channel_id.startswith("UC"):
                 return
-
-            uploads_playlist = (
-                channel_items[0]
-                .get("contentDetails", {})
-                .get("relatedPlaylists", {})
-                .get("uploads", "")
-            )
-            if not uploads_playlist:
-                return
+            uploads_playlist = "UU" + channel_id[2:]
 
             # Récupérer les dernières vidéos via la playlist uploads
             playlist_resp = self.client.get_playlist_videos(

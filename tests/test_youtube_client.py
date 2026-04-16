@@ -227,13 +227,11 @@ class TestSearcherV2:
             "snippet"   : {"title": "Nouvel Artiste", "description": ""},
             "statistics": {"subscriberCount": "5000", "viewCount": "100000", "videoCount": "10"},
             "brandingSettings": {"channel": {}},
-            "contentDetails": {"relatedPlaylists": {"uploads": "PL_new"}},
         }]}
-        mock_client.get_playlist_videos.return_value = {"items": []}
 
         searcher = ArtistSearcher(client=mock_client)
 
-        with patch("src.searcher.save_artist", return_value=True) as mock_save, \
+        with patch("src.searcher.save_artist", return_value=True), \
              patch("src.searcher.save_video"), \
              patch("src.searcher.save_view_snapshot"), \
              patch.object(searcher, "_fetch_recent_videos") as mock_fetch:
@@ -285,25 +283,20 @@ class TestSearcherV2:
         from src.searcher import ArtistSearcher
 
         mock_client = MagicMock()
-        # Simuler une erreur sur get_channel_details dans _fetch_recent_videos
-        mock_client.get_channel_details.side_effect = [
-            # Premier appel (process_batch) → succès
-            {"items": [{
-                "id": "UCtest",
-                "snippet": {"title": "Test", "description": ""},
-                "statistics": {"subscriberCount": "1000", "viewCount": "50000", "videoCount": "5"},
-                "brandingSettings": {"channel": {}},
-                "contentDetails": {"relatedPlaylists": {"uploads": "PL_test"}},
-            }]},
-            # Deuxième appel (_fetch_recent_videos) → erreur
-            Exception("API Error"),
-        ]
+        mock_client.get_channel_details.return_value = {"items": [{
+            "id": "UCtest",
+            "snippet": {"title": "Test", "description": ""},
+            "statistics": {"subscriberCount": "1000", "viewCount": "50000", "videoCount": "5"},
+            "brandingSettings": {"channel": {}},
+        }]}
         mock_client.get_video_details.return_value = {"items": [{
             "id"            : "vid003",
             "snippet"       : {"title": "Test", "publishedAt": "2024-01-01T00:00:00Z"},
             "statistics"    : {"viewCount": "10000", "likeCount": "200", "commentCount": "10"},
             "contentDetails": {"duration": "PT2M"},
         }]}
+        # get_playlist_videos lève une erreur → doit être silencieux
+        mock_client.get_playlist_videos.side_effect = Exception("API Error")
 
         searcher = ArtistSearcher(client=mock_client)
 
