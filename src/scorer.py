@@ -372,11 +372,30 @@ class ArtistScorer:
         )
 
     def _flag_breakout(self, artist: dict, velocity_24h: float):
-        """Enregistre une alerte breakout en base."""
+        """
+        Enregistre une alerte breakout en base.
+        N'insère PAS si une alerte non traitée existe déjà pour ce channel
+        — évite l'accumulation d'alertes dupliquées à chaque scoring.
+        """
         try:
+            channel_id = artist["channel_id"]
+
+            # Vérifier si une alerte breakout non traitée existe déjà
+            with get_db() as conn:
+                existing = conn.execute(text("""
+                    SELECT id FROM video_alerts
+                    WHERE channel_id = :channel_id
+                      AND alert_type = 'breakout'
+                      AND is_processed = FALSE
+                    LIMIT 1
+                """), {"channel_id": channel_id}).fetchone()
+
+            if existing:
+                return  # Alerte déjà présente, pas de doublon
+
             save_alert(
                 video_id   = artist.get("best_video_id", "unknown"),
-                channel_id = artist["channel_id"],
+                channel_id = channel_id,
                 alert_type = "breakout",
                 details    = {
                     "artist_name" : artist.get("artist_name"),
