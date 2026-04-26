@@ -227,10 +227,38 @@ class TestHubSpotProperties:
         assert props.get("company") == "Afrobeat Records"
 
     def test_contact_type_included(self, sample_artist):
+        """contact_type doit être en Title Case pour HubSpot (CONTACT_TYPE_MAP)."""
         sample_artist["enrichment_data"] = {"contact_type": "manager"}
         client = self._make_client()
         props  = client._build_properties(sample_artist)
-        assert props.get("contact_type") == "manager"
+        assert props.get("contact_type") == "Manager"   # Title Case, pas "manager"
+
+    def test_contact_type_artist_default(self, sample_artist):
+        """Sans contact_type, la valeur par défaut est 'Artist'."""
+        sample_artist["enrichment_data"] = {}
+        client = self._make_client()
+        props  = client._build_properties(sample_artist)
+        assert props.get("contact_type") == "Artist"
+
+    def test_prospect_segment_title_case(self, sample_artist):
+        """prospect_segment doit être en Title Case (SEGMENT_MAP)."""
+        client = self._make_client()
+        props  = client._build_properties(sample_artist)
+        # sample_artist["segment"] = "standard" → doit devenir "Standard"
+        assert props.get("prospect_segment") == "Standard"
+
+    def test_prospect_segment_high_potential(self, sample_artist):
+        """high_potential → 'High' (pas 'High_Potential')."""
+        sample_artist["segment"] = "high_potential"
+        client = self._make_client()
+        props  = client._build_properties(sample_artist)
+        assert props.get("prospect_segment") == "High"
+
+    def test_source_platform_casing(self, sample_artist):
+        """source_platform doit être 'Youtube' et non 'YouTube'."""
+        client = self._make_client()
+        props  = client._build_properties(sample_artist)
+        assert props.get("source_platform") == "Youtube"
 
     def test_exactly_10_custom_properties_max(self, sample_artist):
         """On ne doit pas dépasser 10 propriétés custom."""

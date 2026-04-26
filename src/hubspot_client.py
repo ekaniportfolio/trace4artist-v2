@@ -64,6 +64,21 @@ class SyncResult:
     error       : str | None = None
 
 
+# Correspondance casse : valeurs internes → options HubSpot (Title Case)
+SEGMENT_MAP = {
+    "high_potential": "High",
+    "standard"      : "Standard",
+    "emerging"      : "Emerging",
+    "low_priority"  : "Low",
+}
+
+CONTACT_TYPE_MAP = {
+    "artist" : "Artist",
+    "manager": "Manager",
+    "label"  : "Label",
+}
+
+
 class HubSpotClient:
     """
     Synchronise les artistes qualifiés vers HubSpot CRM.
@@ -169,14 +184,22 @@ class HubSpotClient:
             "country"    : artist.get("country", ""),
 
             # ── 10 propriétés CUSTOM Trace4Artist ──────────────────────
+            # Valeurs en Title Case pour correspondre aux options HubSpot
+            # (HubSpot est sensible à la casse sur les enumeration properties)
             "youtube_channel_id"  : artist.get("channel_id", ""),
             "youtube_channel_url" : (
                 f"https://youtube.com/channel/{artist.get('channel_id', '')}"
             ),
             "prospect_score"      : str(round(artist.get("score", 0), 1)),
-            "prospect_segment"    : artist.get("segment", ""),
-            "contact_type"        : enrichment.get("contact_type", "artist"),
-            "source_platform"     : "YouTube",
+            "prospect_segment"    : SEGMENT_MAP.get(
+                                        artist.get("segment", ""),
+                                        artist.get("segment", "").title()
+                                    ),
+            "contact_type"        : CONTACT_TYPE_MAP.get(
+                                        enrichment.get("contact_type", "artist"),
+                                        "Artist"
+                                    ),
+            "source_platform"     : "Youtube",
             "video_views"         : str(artist.get("video_views", 0)),
             "channel_subscribers" : str(artist.get("subscriber_count", 0)),
             "latest_video_url"    : artist.get("latest_video_url", ""),
