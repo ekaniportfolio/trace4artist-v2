@@ -46,19 +46,22 @@ def artist_enricher():
 @pytest.fixture
 def sample_artist():
     return {
-        "channel_id"        : "UCtest123",
-        "artist_name"       : "Artiste Test",
-        "email"             : None,
-        "website"           : None,
-        "country"           : "CM",
-        "subscriber_count"  : 15_000,
-        "score"             : 72.5,
-        "segment"           : "standard",
-        "hubspot_contact_id": None,
-        "enrichment_data"   : None,
-        "video_views"       : 50_000,
-        "latest_video_url"  : "https://youtube.com/watch?v=abc",
-        "spr_score"         : 3.33,
+        "channel_id"         : "UCtest123",
+        "artist_name"        : "Artiste Test",
+        "email"              : None,
+        "website"            : None,
+        "country"            : "CM",
+        "subscriber_count"   : 15_000,
+        "score"              : 72.5,
+        "segment"            : "standard",
+        "hubspot_contact_id" : None,
+        "enrichment_data"    : None,
+        "video_views"        : 50_000,
+        "latest_video_url"   : "https://youtube.com/watch?v=abc",
+        "criteria_breakdown" : {"spr": 15.0, "engagement": 12.0,
+                                "velocity_24h": 8.0, "velocity_7d": 5.0,
+                                "regularity": 8.0, "channel": 7.0,
+                                "web_contact": 2.5},
     }
 
 
@@ -260,6 +263,21 @@ class TestHubSpotProperties:
         props  = client._build_properties(sample_artist)
         assert props.get("source_platform") == "Youtube"
 
+    def test_spr_score_read_from_criteria_breakdown(self, sample_artist):
+        """spr_score doit être lu depuis criteria_breakdown, pas depuis artist."""
+        client = self._make_client()
+        props  = client._build_properties(sample_artist)
+        # criteria_breakdown["spr"] = 15.0 → spr_score = "15.0"
+        assert props.get("spr_score") == "15.0"
+
+    def test_spr_score_zero_when_no_breakdown(self, sample_artist):
+        """Sans criteria_breakdown, spr_score doit valoir '0.0' (exclu du push)."""
+        sample_artist["criteria_breakdown"] = None
+        client = self._make_client()
+        props  = client._build_properties(sample_artist)
+        # "0.0" est filtré par {k: v if v and v != "0.0"}
+        assert "spr_score" not in props
+
     def test_exactly_10_custom_properties_max(self, sample_artist):
         """On ne doit pas dépasser 10 propriétés custom."""
         from src.hubspot_client import HUBSPOT_CUSTOM_PROPERTIES
@@ -286,7 +304,7 @@ class TestHubSpotProperties:
 
 
 # ──────────────────────────────────────────────────────────────────────
-# TESTS : HUBSPOT SYNC CREATE / UPDATE  
+# TESTS : HUBSPOT SYNC CREATE / UPDATE
 # ──────────────────────────────────────────────────────────────────────
 
 class TestHubSpotSync:

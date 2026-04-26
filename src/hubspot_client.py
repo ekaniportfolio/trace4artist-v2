@@ -173,7 +173,16 @@ class HubSpotClient:
 
         Priorité native > custom pour rester dans la limite des 10.
         """
-        enrichment = artist.get("enrichment_data") or {}
+        enrichment    = artist.get("enrichment_data") or {}
+        breakdown     = artist.get("criteria_breakdown") or {}
+        # criteria_breakdown peut être un dict (depuis Python) ou une
+        # chaîne JSON (depuis PostgreSQL JSONB) — on normalise
+        if isinstance(breakdown, str):
+            import json as _json
+            try:
+                breakdown = _json.loads(breakdown)
+            except Exception:
+                breakdown = {}
 
         props = {
             # ── Propriétés NATIVES HubSpot ─────────────────────────────
@@ -203,7 +212,7 @@ class HubSpotClient:
             "video_views"         : str(artist.get("video_views", 0)),
             "channel_subscribers" : str(artist.get("subscriber_count", 0)),
             "latest_video_url"    : artist.get("latest_video_url", ""),
-            "spr_score"           : str(round(artist.get("spr_score", 0), 2)),
+            "spr_score"           : str(round(float(breakdown.get("spr", 0) or 0), 2)),
         }
 
         # Supprimer les valeurs vides pour ne pas écraser HubSpot
@@ -254,11 +263,13 @@ class HubSpotClient:
                     a.enrichment_data,
                     s.score,
                     s.segment,
+                    s.criteria_breakdown,
                     MAX(v.view_count)  as video_views,
                     MAX(v.video_id)    as latest_video_id
                 FROM artists a
                 LEFT JOIN LATERAL (
-                    SELECT score, segment FROM scores
+                    SELECT score, segment, criteria_breakdown
+                    FROM scores
                     WHERE channel_id = a.channel_id
                     ORDER BY calculated_at DESC LIMIT 1
                 ) s ON true
@@ -267,7 +278,7 @@ class HubSpotClient:
                 GROUP BY
                     a.channel_id, a.artist_name, a.email, a.website,
                     a.country, a.subscriber_count, a.hubspot_contact_id,
-                    a.enrichment_data, s.score, s.segment
+                    a.enrichment_data, s.score, s.segment, s.criteria_breakdown
                 ORDER BY s.score DESC NULLS LAST
             """))
             artists = [dict(row._mapping) for row in result.fetchall()]
