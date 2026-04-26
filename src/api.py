@@ -1310,3 +1310,28 @@ def backfill_videos(
 
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+# ──────────────────────────────────────────────────────────────────────────────
+# ENDPOINT DE SYNC HUBSPOT — Synchronisation directe sans passer par Celery
+# ──────────────────────────────────────────────────────────────────────────────
+
+@app.post("/admin/sync-hubspot", tags=["Admin"], status_code=202)
+def sync_hubspot_now(_: TokenData = Depends(require_admin)):
+    """
+    Synchronise les artistes qualifiés vers HubSpot CRM directement,
+    sans passer par Celery (worker instable sur Cloud Run Services).
+    Utilise sync_qualified_artists() qui gère l'anti-doublon et le
+    mapping complet des 10 propriétés custom.
+    """
+    try:
+        from src.hubspot_client import HubSpotClient
+        client = HubSpotClient()
+        synced = client.sync_qualified_artists()
+        return {
+            "status": "ok",
+            "synced": synced,
+            "message": f"{synced} artiste(s) synchronisé(s) vers HubSpot",
+        }
+    except Exception as e:
+        logger.error(f"sync-hubspot : {e}")
+        raise HTTPException(status_code=500, detail=str(e))
