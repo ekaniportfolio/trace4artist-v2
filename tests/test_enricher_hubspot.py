@@ -286,7 +286,7 @@ class TestHubSpotProperties:
 
 
 # ──────────────────────────────────────────────────────────────────────
-# TESTS : HUBSPOT SYNC CREATE / UPDATE
+# TESTS : HUBSPOT SYNC CREATE / UPDATE  
 # ──────────────────────────────────────────────────────────────────────
 
 class TestHubSpotSync:
