@@ -1470,3 +1470,39 @@ def debug_channel(
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+# ──────────────────────────────────────────────────────────────────────────────
+# ENDPOINT ENRICHISSEMENT — Google Search + Spotify, sans Celery
+# ──────────────────────────────────────────────────────────────────────────────
+
+@app.post("/admin/enrich-artists", tags=["Admin"], status_code=202)
+def enrich_artists_now(_: TokenData = Depends(require_admin)):
+    """
+    Enrichit les artistes qualifiés via Google Custom Search + Spotify.
+    Exécuté directement sans passer par Celery (worker instable).
+
+    - Traite 30 artistes par appel (priorité : high_potential en premier)
+    - Coût : 2 requêtes Google par artiste (60 requêtes / appel)
+    - Quota Google : 100 req/jour → 1-2 appels par jour maximum
+    - Appeler une fois par jour jusqu'à ce que tous les artistes soient enrichis
+    """
+    try:
+        from src.enricher import ArtistEnricher
+        enricher = ArtistEnricher()
+        results  = enricher.enrich_qualified_artists()
+        enriched = sum(1 for r in results if r.success)
+        quota    = enricher.google._quota_used_today
+
+        return {
+            "status"      : "ok",
+            "processed"   : len(results),
+            "enriched"    : enriched,
+            "google_quota": quota,
+            "message"     : (
+                f"{enriched}/{len(results)} artistes enrichis "
+                f"({quota} requêtes Google utilisées)"
+            ),
+        }
+    except Exception as e:
+        logger.error(f"enrich-artists : {e}")
+        raise HTTPException(status_code=500, detail=str(e))

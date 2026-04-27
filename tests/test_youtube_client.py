@@ -319,77 +319,76 @@ class TestContactExtraction:
     les profileLinks YouTube en plus de la description.
     """
 
-    def test_extracts_instagram_from_profile_links(self):
-        """Instagram doit être extrait depuis les liens officiels en priorité."""
+    def test_extracts_instagram_from_description(self):
+        """Instagram doit être extrait depuis la description."""
         from src.searcher import ArtistSearcher
-        links = ["https://www.instagram.com/monartiste_officiel"]
-        contacts = ArtistSearcher._extract_contacts("", links)
+        text = "Retrouvez-moi sur https://www.instagram.com/monartiste_officiel"
+        contacts = ArtistSearcher._extract_contacts(text)
         assert contacts["instagram"] == "monartiste_officiel"
 
-    def test_extracts_website_from_profile_links(self):
-        """Le site officiel doit être extrait depuis les liens officiels."""
+    def test_extracts_website_from_description(self):
+        """Le site officiel doit être extrait depuis la description."""
         from src.searcher import ArtistSearcher
-        links = ["https://monartiste.cm/booking"]
-        contacts = ArtistSearcher._extract_contacts("", links)
+        text = "Site officiel : https://monartiste.cm/booking"
+        contacts = ArtistSearcher._extract_contacts(text)
         assert contacts["website"] == "https://monartiste.cm/booking"
 
     def test_linktree_counts_as_website(self):
         """Linktree est accepté comme site de contact."""
         from src.searcher import ArtistSearcher
-        links = ["https://linktr.ee/monartiste"]
-        contacts = ArtistSearcher._extract_contacts("", links)
+        text = "Tous mes liens : https://linktr.ee/monartiste"
+        contacts = ArtistSearcher._extract_contacts(text)
         assert contacts["website"] == "https://linktr.ee/monartiste"
 
     def test_extracts_email_from_description(self):
-        """Email extrait depuis la description si absent des liens."""
+        """Email extrait depuis la description."""
         from src.searcher import ArtistSearcher
         text = "Pour tout contact : booking@monartiste.cm"
-        contacts = ArtistSearcher._extract_contacts(text, [])
+        contacts = ArtistSearcher._extract_contacts(text)
         assert contacts["email"] == "booking@monartiste.cm"
 
     def test_prefers_pro_email_over_personal(self):
         """Email professionnel (booking@) préféré à email personnel (gmail)."""
         from src.searcher import ArtistSearcher
         text = "perso@gmail.com | booking@label.com"
-        contacts = ArtistSearcher._extract_contacts(text, [])
+        contacts = ArtistSearcher._extract_contacts(text)
         assert contacts["email"] == "booking@label.com"
 
     def test_extracts_obfuscated_email(self):
         """Emails obfusqués (contact[at]domain[dot]com) correctement décodés."""
         from src.searcher import ArtistSearcher
         text = "contact[at]monlabel[dot]com"
-        contacts = ArtistSearcher._extract_contacts(text, [])
+        contacts = ArtistSearcher._extract_contacts(text)
         assert contacts["email"] == "contact@monlabel.com"
 
-    def test_profile_links_override_description(self):
-        """Les liens officiels ont priorité sur la description."""
+    def test_instagram_url_preferred_over_handle(self):
+        """URL Instagram complète préférée à un simple @handle."""
         from src.searcher import ArtistSearcher
-        text = "Mon Instagram: @faux_handle"
-        links = ["https://www.instagram.com/vrai_handle"]
-        contacts = ArtistSearcher._extract_contacts(text, links)
+        text = "instagram.com/vrai_handle | @autre_handle"
+        contacts = ArtistSearcher._extract_contacts(text)
         assert contacts["instagram"] == "vrai_handle"
 
     def test_excludes_youtube_internal_emails(self):
         """Emails youtube.com ne doivent pas être extraits."""
         from src.searcher import ArtistSearcher
         text = "noreply@youtube.com"
-        contacts = ArtistSearcher._extract_contacts(text, [])
+        contacts = ArtistSearcher._extract_contacts(text)
         assert contacts["email"] is None
 
     def test_excludes_social_platforms_from_website(self):
         """Instagram, TikTok, Facebook ne comptent pas comme site officiel."""
         from src.searcher import ArtistSearcher
-        links = ["https://www.instagram.com/artiste",
-                 "https://www.tiktok.com/@artiste",
-                 "https://monartiste.com"]
-        contacts = ArtistSearcher._extract_contacts("", links)
+        text = ("https://www.instagram.com/artiste "
+                "https://www.tiktok.com/@artiste "
+                "https://monartiste.com")
+        contacts = ArtistSearcher._extract_contacts(text)
         assert contacts["website"] == "https://monartiste.com"
 
     def test_returns_none_when_nothing_found(self):
         """Sans contact, retourne None pour chaque champ."""
         from src.searcher import ArtistSearcher
         contacts = ArtistSearcher._extract_contacts(
-            "Welcome to my channel! New music every Friday.", []
+            "Welcome to my channel! New music every Friday."
         )
         assert contacts["email"]     is None
         assert contacts["website"]   is None

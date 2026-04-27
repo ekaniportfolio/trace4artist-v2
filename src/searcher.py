@@ -5,10 +5,14 @@ Différences vs v1 :
     - Sauvegarde dans PostgreSQL (via database.py SQLAlchemy)
     - Snapshot des vues à chaque passage (pour la vélocité)
     - Utilisé par _scan_region() dans scheduler.py
-    - Extraction de contacts enrichie :
-        * Description de la chaîne (regex)
-        * brandingSettings.channel.profileLinks (liens officiels YouTube)
-        * snippet.customUrl (handle @artiste)
+
+Extraction de contacts :
+    - Description de la chaîne YouTube (regex)
+    - Email obfusqué (contact[at]domain[dot]com)
+    - Email professionnel (booking@, contact@) prioritaire
+    Note : YouTube API ne retourne pas les liens sociaux (profileLinks)
+    via clé API — uniquement via OAuth du propriétaire de la chaîne.
+    L'enrichissement complet est géré par GoogleSearchEnricher (enricher.py).
 """
 
 import re
@@ -23,7 +27,6 @@ logger = logging.getLogger(__name__)
 EMAIL_PATTERN = re.compile(
     r"[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+",
 )
-# Variantes obfusquées courantes : contact[at]domain.com, email[dot]com
 EMAIL_OBFUSCATED = re.compile(
     r"([a-zA-Z0-9_.+-]+)\s*[\[\(]at[\]\)]\s*([a-zA-Z0-9-]+)\s*[\[\(]dot[\]\)]\s*([a-zA-Z0-9-.]+)",
     re.IGNORECASE,
@@ -32,15 +35,10 @@ INSTAGRAM_PATTERN = re.compile(
     r"(?:instagram\.com/|(?<!\w)@)([\w.]{2,30})",
     re.IGNORECASE,
 )
-TIKTOK_PATTERN = re.compile(
-    r"(?:tiktok\.com/@?|(?<!\w)@)([\w.]{2,30})",
-    re.IGNORECASE,
-)
-# Sites officiels — exclut les plateformes sociales connues
 WEBSITE_PATTERN = re.compile(
     r"https?://(?!(?:www\.)?(?:youtube|instagram|facebook|twitter|tiktok|"
-    r"linktr\.ee|linktree|open\.spotify|music\.apple|soundcloud|"
-    r"boomplay|audiomack|deezer|spotify))[\w\-.]+"
+    r"linktr\.ee|open\.spotify|music\.apple|soundcloud|boomplay|audiomack|"
+    r"deezer|spotify))[\w\-.]+"
     r"(?:\.com|\.net|\.org|\.io|\.co|\.cm|\.ng|\.ci|\.sn|\.gh|\.ke|\.za)"
     r"(?:/[\w\-._~:/?#\[\]@!$&\'()*+,;=%]*)?",
     re.IGNORECASE,
@@ -49,19 +47,12 @@ LINKTREE_PATTERN = re.compile(
     r"https?://(?:www\.)?linktr\.ee/[\w.-]+",
     re.IGNORECASE,
 )
-
-# Domaines de messagerie communs des artistes africains
-EMAIL_DOMAINS_KNOWN = {
-    "gmail.com", "yahoo.com", "hotmail.com", "outlook.com",
-    "icloud.com", "live.com", "protonmail.com",
-}
-
-# Préfixes d'email pro (booking, management, contact…)
 BOOKING_PREFIXES = re.compile(
     r"(?:booking|contact|management|manager|press|promo|info|"
     r"label|artiste|artist|officiel|official|music)[\s:@]",
     re.IGNORECASE,
 )
+
 
 
 class ArtistSearcher:
@@ -181,29 +172,17 @@ class ArtistSearcher:
     # ──────────────────────────────────────────────────────────────────
 
     def _parse_artist(self, channel_id: str, region: str, channel: dict) -> dict:
-        snippet          = channel.get("snippet", {})
-        stats            = channel.get("statistics", {})
-        branding         = channel.get("brandingSettings", {}).get("channel", {})
-        description      = snippet.get("description", "") or ""
+        snippet     = channel.get("snippet", {})
+        stats       = channel.get("statistics", {})
+        description = snippet.get("description", "") or ""
 
-        # ── Liens officiels YouTube (brandingSettings.channel.profileLinks) ──
-        # Ce sont les liens que l'artiste affiche sur sa page YouTube :
-        # Instagram, site officiel, TikTok, Linktree, etc.
-        profile_links = branding.get("profileLinks", []) or []
-        link_urls     = [l.get("linkUrl", "") for l in profile_links if l.get("linkUrl")]
-
-        # ── Texte complet à analyser ──────────────────────────────────────────
-        # Concaténer description + toutes les URLs de liens pour maximiser
-        # les chances d'extraction
-        full_text = description + "\n" + "\n".join(link_urls)
-
-        contacts = self._extract_contacts(full_text, link_urls)
+        contacts = self._extract_contacts(description)
 
         return {
             "channel_id"      : channel_id,
             "artist_name"     : snippet.get("title", ""),
             "country"         : region,
-            "description"     : description[:500] if description else "",
+            "description"     : description[:500],
             "subscriber_count": int(stats.get("subscriberCount", 0)),
             "total_views"     : int(stats.get("viewCount", 0)),
             "video_count"     : int(stats.get("videoCount", 0)),
@@ -291,82 +270,42 @@ class ArtistSearcher:
         return {item["id"]: item for item in items if item.get("id")}
 
     @classmethod
-    def _extract_contacts(cls, text: str, link_urls: list = None) -> dict:
+    def _extract_contacts(cls, text: str) -> dict:
         """
-        Extrait email, site web et Instagram depuis le texte et les liens
-        officiels YouTube (profileLinks).
+        Extrait email, site web et Instagram depuis la description YouTube.
 
-        Stratégie par priorité :
-        1. Liens officiels YouTube (profileLinks) → plus fiables
-        2. Regex sur la description → fallback
-        3. Email obfusqué (contact[at]domain[dot]com) → dernier recours
+        Note : YouTube API ne retourne pas les liens sociaux (profileLinks)
+        via clé API publique. L'enrichissement complet des contacts passe
+        par GoogleSearchEnricher (POST /admin/enrich-artists).
 
-        Returns:
-            dict avec email, website, instagram (None si non trouvé)
+        Stratégie :
+        1. Email professionnel (booking@, contact@) en priorité
+        2. Email obfusqué (contact[at]domain[dot]com)
+        3. Email personnel en fallback
+        4. Site officiel (hors plateformes sociales)
+        5. Linktree comme site de contact
+        6. Instagram depuis la description
         """
-        link_urls = link_urls or []
         result = {"email": None, "website": None, "instagram": None}
 
-        # ── 1. INSTAGRAM — depuis les liens officiels d'abord ─────────────
-        for url in link_urls:
-            if "instagram.com" in url.lower():
-                m = re.search(r"instagram\.com/([^/?#\s]+)", url, re.IGNORECASE)
-                if m and m.group(1) not in ("", "p", "explore", "accounts"):
-                    result["instagram"] = m.group(1).rstrip("/")
-                    break
-
-        # Fallback description
-        if not result["instagram"]:
-            m = INSTAGRAM_PATTERN.search(text)
-            if m:
-                handle = m.group(1)
-                # Exclure les faux positifs courants
-                if handle.lower() not in ("com", "fr", "en", "music", "official"):
-                    result["instagram"] = handle
-
-        # ── 2. WEBSITE — depuis les liens officiels d'abord ───────────────
-        for url in link_urls:
-            if WEBSITE_PATTERN.match(url):
-                result["website"] = url
-                break
-            # Linktree compte comme site de contact
-            if LINKTREE_PATTERN.match(url):
-                result["website"] = url
-                break
-
-        # Fallback description
-        if not result["website"]:
-            m = WEBSITE_PATTERN.search(text)
-            if m:
-                result["website"] = m.group(0)
-            elif not result["website"]:
-                m = LINKTREE_PATTERN.search(text)
-                if m:
-                    result["website"] = m.group(0)
-
-        # ── 3. EMAIL — priorité aux adresses pro (booking, contact...) ────
+        # ── EMAIL ─────────────────────────────────────────────────────────
         all_emails = EMAIL_PATTERN.findall(text)
-
-        # Filtrer les faux positifs (emails YouTube internes, etc.)
         valid_emails = [
             e for e in all_emails
             if "youtube.com" not in e
-            and "youtu.be" not in e
+            and "youtu.be"   not in e
             and "example.com" not in e
             and len(e) > 6
         ]
-
         if valid_emails:
-            # Préférer les emails pro (booking@, contact@, management@...)
-            pro_emails = [
+            pro = [
                 e for e in valid_emails
-                if BOOKING_PREFIXES.match(e.split("@")[0] + "@")
-                or e.split("@")[0].lower() in (
+                if e.split("@")[0].lower() in (
                     "booking", "contact", "management", "manager",
                     "press", "promo", "info", "label", "official"
                 )
             ]
-            result["email"] = pro_emails[0] if pro_emails else valid_emails[0]
+            result["email"] = pro[0] if pro else valid_emails[0]
 
         # Fallback : email obfusqué (contact[at]domain[dot]com)
         if not result["email"]:
@@ -374,9 +313,25 @@ class ArtistSearcher:
             if m:
                 result["email"] = f"{m.group(1)}@{m.group(2)}.{m.group(3)}"
 
+        # ── WEBSITE ───────────────────────────────────────────────────────
+        m = WEBSITE_PATTERN.search(text)
+        if m:
+            result["website"] = m.group(0)
+        elif not result["website"]:
+            m = LINKTREE_PATTERN.search(text)
+            if m:
+                result["website"] = m.group(0)
+
+        # ── INSTAGRAM ─────────────────────────────────────────────────────
+        m = INSTAGRAM_PATTERN.search(text)
+        if m:
+            handle = m.group(1)
+            if handle.lower() not in ("com", "fr", "en", "music", "official"):
+                result["instagram"] = handle
+
         return result
 
-    # ── Méthodes statiques conservées pour compatibilité avec les tests ────
+    # ── Méthodes statiques conservées pour compatibilité ──────────────────
     @staticmethod
     def _extract_email(text: str) -> str | None:
         m = EMAIL_PATTERN.search(text)
