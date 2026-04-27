@@ -1421,3 +1421,52 @@ def reextract_contacts(
     except Exception as e:
         logger.error(f"reextract-contacts : {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+# ──────────────────────────────────────────────────────────────────────────────
+# ENDPOINT DEBUG — Voir les données brutes YouTube pour un channel
+# À supprimer après diagnostic
+# ──────────────────────────────────────────────────────────────────────────────
+
+@app.get("/admin/debug-channel/{channel_id}", tags=["Admin"])
+def debug_channel(
+    channel_id: str,
+    _: TokenData = Depends(require_admin),
+):
+    """
+    Retourne les données brutes YouTube pour un channel_id.
+    Utile pour diagnostiquer l'extraction de contacts.
+    Vide le cache pour ce channel avant l'appel.
+    """
+    try:
+        from src.youtube_client import YouTubeClient
+        client = YouTubeClient()
+
+        # Vider le cache pour ce channel spécifiquement
+        cache_key = f"channels:{channel_id}"
+        try:
+            client._get_redis().delete(cache_key)
+        except Exception:
+            pass
+
+        response = client.get_channel_details([channel_id])
+        items    = response.get("items", [])
+
+        if not items:
+            return {"error": "Channel non trouvé"}
+
+        item     = items[0]
+        branding = item.get("brandingSettings", {})
+        snippet  = item.get("snippet", {})
+
+        return {
+            "channel_id"      : channel_id,
+            "title"           : snippet.get("title"),
+            "description"     : snippet.get("description", "")[:300],
+            "branding_keys"   : list(branding.keys()),
+            "channel_keys"    : list(branding.get("channel", {}).keys()),
+            "profile_links"   : branding.get("channel", {}).get("profileLinks"),
+            "featured_urls"   : branding.get("channel", {}).get("featuredChannelsUrls"),
+            "raw_channel"     : branding.get("channel", {}),
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
