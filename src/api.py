@@ -1335,3 +1335,89 @@ def sync_hubspot_now(_: TokenData = Depends(require_admin)):
     except Exception as e:
         logger.error(f"sync-hubspot : {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+# ──────────────────────────────────────────────────────────────────────────────
+# ENDPOINT DE REMEDIATION CONTACTS — Ré-extrait les contacts depuis YouTube
+# pour les artistes qui n'en ont pas, en exploitant les profileLinks
+# ──────────────────────────────────────────────────────────────────────────────
+
+@app.post("/admin/reextract-contacts", tags=["Admin"], status_code=202)
+def reextract_contacts(
+    limit: int = Query(default=50, ge=1, le=200),
+    _    : TokenData = Depends(require_admin),
+):
+    """
+    Ré-extrait les contacts (email, site, instagram) pour les artistes
+    qualifiés sans email, en rappelant channels.list pour récupérer
+    les profileLinks officiels (liens affichés sur la page YouTube).
+
+    Coût quota : 1 unité par artiste (channels.list).
+    Appeler plusieurs fois avec limit=50 pour couvrir tous les artistes.
+    """
+    try:
+        from src.youtube_client import YouTubeClient
+        from src.searcher import ArtistSearcher
+
+        # Artistes qualifiés sans email
+        with get_db() as conn:
+            rows = conn.execute(text("""
+                SELECT channel_id, artist_name
+                FROM artists
+                WHERE status = 'qualified'
+                  AND (email IS NULL OR email = '')
+                ORDER BY subscriber_count DESC
+                LIMIT :limit
+            """), {"limit": limit}).fetchall()
+
+        if not rows:
+            return {"status": "ok", "message": "Tous les artistes ont un email", "updated": 0}
+
+        channel_ids = [r[0] for r in rows]
+        client      = YouTubeClient()
+        searcher    = ArtistSearcher(client=client)
+        updated     = 0
+
+        # Appels par batch de 50 (limite YouTube)
+        for i in range(0, len(channel_ids), 50):
+            batch    = channel_ids[i:i+50]
+            response = client.get_channel_details(batch)
+
+            for item in response.get("items", []):
+                cid       = item["id"]
+                snippet   = item.get("snippet", {})
+                branding  = item.get("brandingSettings", {}).get("channel", {})
+                desc      = snippet.get("description", "") or ""
+                links     = branding.get("profileLinks", []) or []
+                link_urls = [l.get("linkUrl", "") for l in links if l.get("linkUrl")]
+                full_text = desc + "\n" + "\n".join(link_urls)
+
+                contacts = searcher._extract_contacts(full_text, link_urls)
+
+                # Ne mettre à jour que si on a trouvé quelque chose de nouveau
+                if any(contacts.values()):
+                    with get_db() as conn:
+                        conn.execute(text("""
+                            UPDATE artists SET
+                                email     = COALESCE(NULLIF(:email, ''),    email),
+                                website   = COALESCE(NULLIF(:website, ''),  website),
+                                instagram = COALESCE(NULLIF(:instagram, ''), instagram),
+                                updated_at = NOW()
+                            WHERE channel_id = :channel_id
+                        """), {
+                            "email"     : contacts["email"]     or "",
+                            "website"   : contacts["website"]   or "",
+                            "instagram" : contacts["instagram"] or "",
+                            "channel_id": cid,
+                        })
+                    updated += 1
+
+        return {
+            "status"   : "ok",
+            "processed": len(channel_ids),
+            "updated"  : updated,
+            "message"  : f"{updated} artistes mis à jour avec de nouveaux contacts",
+        }
+
+    except Exception as e:
+        logger.error(f"reextract-contacts : {e}")
+        raise HTTPException(status_code=500, detail=str(e))

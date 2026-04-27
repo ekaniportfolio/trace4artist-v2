@@ -6,3 +6,4 @@ exports/
 test_real_api.py
 *.egg-info/
 .pytest_cache/
+remarques.txt
