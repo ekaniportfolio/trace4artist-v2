@@ -440,7 +440,7 @@ class ArtistEnricher:
                         ELSE 4
                     END,
                     a.updated_at DESC
-                LIMIT 30
+                LIMIT 45  -- 45 × 2 req Google = 90/100 quota journalier
             """))
             return [dict(row._mapping) for row in result.fetchall()]
 
