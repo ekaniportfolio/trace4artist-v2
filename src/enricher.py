@@ -471,7 +471,7 @@ class ArtistEnricher:
             if enrichment:
                 conn.execute(text("""
                     UPDATE artists SET
-                        enrichment_data = :data::jsonb
+                        enrichment_data = CAST(:data AS jsonb)
                     WHERE channel_id = :channel_id
                 """), {
                     "channel_id": result.channel_id,
