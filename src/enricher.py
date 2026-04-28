@@ -203,7 +203,11 @@ class GoogleSearchEnricher:
     def search_artist(self, artist_name: str) -> dict:
         """
         Lance 2 requêtes Google ciblées pour un artiste.
-        Returns: dict avec website, email, press_article (si trouvés)
+        PSE configuré sur : instagram.com, facebook.com, linktr.ee,
+        audiomack.com, boomplay.com, soundcloud.com, beacons.ai, bio.link
+
+        Returns: dict avec email, instagram, website, audiomack,
+                 soundcloud, linktree (si trouvés)
         """
         found = {}
 
@@ -213,20 +217,23 @@ class GoogleSearchEnricher:
         if self._quota_used_today >= GOOGLE_SEARCH_DAILY_LIMIT - 2:
             return found
 
-        # Requête 1 : Contact et site officiel
+        # Requête 1 : Profil et contacts directs
+        # Cible les pages de profil (audiomack, boomplay, soundcloud)
+        # et les agrégateurs de liens (linktr.ee, beacons.ai, bio.link)
         items = self._search(
-            f'"{artist_name}" artiste musique contact booking'
+            f'"{artist_name}" musician artist'
         )
         if items:
             self._extract_contact(items, found)
 
-        # Requête 2 : Articles de presse récents
-        press_items = self._search(
-            f'"{artist_name}" musique 2024 OR 2025',
-            date_restrict="y1",
-        )
-        if press_items:
-            self._extract_press(press_items, found)
+        # Requête 2 : Email de contact depuis Instagram ou Facebook
+        # Les bios Instagram contiennent souvent des emails pro
+        if self._quota_used_today < GOOGLE_SEARCH_DAILY_LIMIT:
+            items2 = self._search(
+                f'"{artist_name}" booking OR contact OR email'
+            )
+            if items2:
+                self._extract_contact(items2, found)
 
         return found
 
@@ -269,28 +276,90 @@ class GoogleSearchEnricher:
 
     @staticmethod
     def _extract_contact(items: list, found: dict):
+        """
+        Extrait email, profil Instagram, site officiel, et profils
+        musicaux depuis les résultats Google.
+
+        Priorité website : linktree > music_profile > instagram > autre
+        """
         email_pattern = re.compile(
             r"[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+"
         )
-        social_domains = (
-            "youtube.com", "instagram.com", "facebook.com",
-            "twitter.com", "tiktok.com", "wikipedia.org",
+        music_platforms  = ("audiomack.com", "boomplay.com", "soundcloud.com")
+        link_aggregators = ("linktr.ee", "beacons.ai", "bio.link")
+        excluded         = (
+            "youtube.com", "youtu.be", "spotify.com",
+            "music.apple.com", "deezer.com",
         )
+
+        # Collecte par catégorie — on applique la priorité après
+        candidates = {
+            "linktree"     : None,
+            "music_profile": None,
+            "instagram_url": None,
+            "other"        : None,
+        }
+
         for item in items:
             url     = item.get("link", "")
             snippet = item.get("snippet", "")
+            title   = item.get("title", "")
+            text    = f"{snippet} {title}"
 
-            if "website" not in found and url:
-                if not any(d in url for d in social_domains):
-                    found["website"] = url
-
+            # Email
             if "email" not in found:
-                m = email_pattern.search(snippet)
+                m = email_pattern.search(text)
                 if m:
-                    found["email"] = m.group(0)
+                    email = m.group(0)
+                    if not any(d in email for d in (
+                        "youtube.com", "instagram.com", "facebook.com",
+                        "example.com", "noreply",
+                    )):
+                        found["email"] = email
+
+            # Aggrégateur de liens
+            if not candidates["linktree"] and url:
+                if any(d in url for d in link_aggregators):
+                    candidates["linktree"] = url
+                    found["linktree"] = url
+
+            # Instagram
+            if "instagram" not in found and "instagram.com" in url:
+                parts  = url.rstrip("/").split("/")
+                handle = parts[-1] if parts else ""
+                if handle and handle not in (
+                    "p", "explore", "accounts", "stories", "reel"
+                ):
+                    found["instagram"]          = handle
+                    candidates["instagram_url"] = url
+
+            # Profil musical
+            if not candidates["music_profile"] and url:
+                if any(d in url for d in music_platforms):
+                    candidates["music_profile"] = url
+                    found["music_profile"]       = url
+
+            # Autre site (hors exclusions)
+            if not candidates["other"] and url:
+                if not any(d in url for d in excluded):
+                    if not any(d in url for d in
+                               link_aggregators + music_platforms + ("instagram.com",)):
+                        candidates["other"] = url
+
+        # Appliquer la priorité website : linktree > music > instagram > autre
+        if "website" not in found:
+            best = (
+                candidates["linktree"]
+                or candidates["music_profile"]
+                or candidates["instagram_url"]
+                or candidates["other"]
+            )
+            if best:
+                found["website"] = best
 
     @staticmethod
     def _extract_press(items: list, found: dict):
+        """Conservé pour compatibilité — remplacé par _extract_contact."""
         social_domains = ("youtube.com", "instagram.com", "facebook.com")
         for item in items:
             url = item.get("link", "")
@@ -452,20 +521,23 @@ class ArtistEnricher:
             # Mise à jour des colonnes directes
             conn.execute(text("""
                 UPDATE artists SET
-                    email      = COALESCE(:email,   email),
-                    website    = COALESCE(:website, website),
+                    email      = COALESCE(:email,     email),
+                    website    = COALESCE(:website,   website),
+                    instagram  = COALESCE(:instagram, instagram),
                     updated_at = NOW()
                 WHERE channel_id = :channel_id
             """), {
                 "channel_id": result.channel_id,
                 "email"     : found.get("email"),
                 "website"   : found.get("website"),
+                "instagram" : found.get("instagram"),
             })
 
-            # Enrichment data (label, spotify, presse...)
+            # Enrichment data — inclut les nouveaux champs PSE
             enrichment_keys = (
                 "label", "spotify_url", "popularity",
                 "press_article", "contact_type", "genres",
+                "linktree", "music_profile",
             )
             enrichment = {k: found[k] for k in enrichment_keys if k in found}
             if enrichment:

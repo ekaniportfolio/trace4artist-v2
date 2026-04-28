@@ -92,8 +92,40 @@ class TestGoogleExtraction:
         google_enricher._extract_contact(google_results, found)
         assert found.get("email") == "booking@artistetest.cm"
 
-    def test_ignores_social_media_as_website(self, google_enricher):
+    def test_instagram_stored_as_website_and_instagram(self, google_enricher):
+        """Instagram est maintenant accepté comme website (dans le PSE)
+        ET le handle est extrait dans le champ instagram."""
         items = [{"link": "https://instagram.com/artiste",
+                  "title": "Artiste — Instagram", "snippet": ""}]
+        found = {}
+        google_enricher._extract_contact(items, found)
+        assert found.get("website")   == "https://instagram.com/artiste"
+        assert found.get("instagram") == "artiste"
+
+    def test_linktree_prioritized_as_website(self, google_enricher):
+        """Linktree est prioritaire comme website car contient tous les liens."""
+        items = [
+            {"link": "https://instagram.com/artiste",
+             "title": "", "snippet": ""},
+            {"link": "https://linktr.ee/artiste",
+             "title": "", "snippet": ""},
+        ]
+        found = {}
+        google_enricher._extract_contact(items, found)
+        assert found.get("linktree") == "https://linktr.ee/artiste"
+        assert found.get("website")  == "https://linktr.ee/artiste"
+
+    def test_audiomack_stored_as_music_profile(self, google_enricher):
+        """Audiomack est stocké comme music_profile."""
+        items = [{"link": "https://audiomack.com/artiste",
+                  "title": "", "snippet": ""}]
+        found = {}
+        google_enricher._extract_contact(items, found)
+        assert found.get("music_profile") == "https://audiomack.com/artiste"
+
+    def test_youtube_excluded_from_website(self, google_enricher):
+        """YouTube reste exclu du website."""
+        items = [{"link": "https://youtube.com/channel/UCtest",
                   "title": "", "snippet": ""}]
         found = {}
         google_enricher._extract_contact(items, found)
